@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uranus2 — Central WhatsApp</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #263348;
+    --border: #334155;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent: #3b82f6;
+    --critica: #ef4444;
+    --alta: #f97316;
+    --media: #eab308;
+    --baixa: #22c55e;
+    --radius: 10px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #475569;
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .status-dot.connected { background: var(--baixa); box-shadow: 0 0 6px var(--baixa); }
+
+  .status-label {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  #last-update {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn.ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 20px 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 56px;
+    z-index: 99;
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 8px 18px 10px;
+    font-size: 14px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* TAB PANES */
+  .tab-pane { display: none; padding: 20px; }
+  .tab-pane.active { display: block; }
+
+  /* FILTER BAR */
+  .filter-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+
+  .filter-bar input[type="text"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
+    width: 220px;
+    outline: none;
+  }
+  .filter-bar input[type="text"]:focus { border-color: var(--accent); }
+
+  .filter-bar select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .filter-bar label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* PRIORITY COLUMNS */
+  .priority-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  @media (max-width: 1100px) {
+    .priority-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .priority-grid { grid-template-columns: 1fr; }
+  }
+
+  .priority-col {}
+
+  .priority-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    margin-bottom: 10px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+
+  .priority-header .ph-count {
+    margin-left: auto;
+    background: rgba(0,0,0,0.25);
+    border-radius: 20px;
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+
+  .p-CRITICA { background: rgba(239,68,68,0.18); color: var(--critica); border-top: 3px solid var(--critica); }
+  .p-ALTA    { background: rgba(249,115,22,0.18); color: var(--alta);   border-top: 3px solid var(--alta); }
+  .p-MEDIA   { background: rgba(234,179,8,0.18);  color: var(--media);  border-top: 3px solid var(--media); }
+  .p-BAIXA   { background: rgba(34,197,94,0.18);  color: var(--baixa);  border-top: 3px solid var(--baixa); }
+
+  /* CARD */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 10px;
+    transition: opacity 0.3s, border-color 0.2s;
+  }
+  .card:hover { border-color: #475569; }
+  .card.resolved { opacity: 0.42; }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .card-name {
+    font-weight: 700;
+    font-size: 14px;
+    flex: 1;
+    line-height: 1.3;
+  }
+
+  .badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .badge-grupo { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .badge-individual { background: rgba(168,85,247,0.2); color: #c084fc; }
+  .badge-unread { background: var(--critica); color: #fff; }
+
+  .card-time {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+
+  .card-summary {
+    color: #cbd5e1;
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+
+  .card-summary.collapsed {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .expand-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 8px;
+  }
+
+  .suggestion-block {
+    background: var(--surface2);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: #93c5fd;
+    line-height: 1.5;
+    position: relative;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(59,130,246,0.2);
+    border: none;
+    border-radius: 4px;
+    color: #60a5fa;
+    font-size: 10px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .copy-btn:hover { background: rgba(59,130,246,0.4); }
+
+  .action-items {
+    list-style: none;
+    margin-bottom: 8px;
+  }
+
+  .action-items li {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    line-height: 1.4;
+  }
+
+  .action-items li::before {
+    content: '□';
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+
+  .resolve-btn {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    margin-top: 4px;
+  }
+  .resolve-btn:hover { border-color: var(--baixa); color: var(--baixa); }
+  .resolve-btn.resolved { background: rgba(34,197,94,0.15); border-color: var(--baixa); color: var(--baixa); }
+
+  /* ANALYTICS */
+  .analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 768px) {
+    .analytics-grid { grid-template-columns: 1fr; }
+  }
+
+  .analytics-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
+  .analytics-card h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 16px;
+  }
+
+  .summary-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 900px) {
+    .summary-cards { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+
+  .summary-card .sc-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .summary-card .sc-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* HISTORY */
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 600px;
+  }
+
+  .history-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: border-color 0.2s;
+  }
+  .history-item:hover { border-color: var(--accent); }
+  .history-item .hi-name { font-size: 13px; font-weight: 500; }
+  .history-item .hi-badge { font-size: 11px; color: var(--accent); }
+
+  .history-viewer {
+    margin-top: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: none;
+  }
+  .history-viewer.visible { display: block; }
+
+  .history-viewer pre {
+    white-space: pre-wrap;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.6;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  /* TOAST */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 18px;
+    font-size: 13px;
+    color: var(--text);
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 999;
+    pointer-events: none;
+    max-width: 320px;
+  }
+  #toast.visible { opacity: 1; }
+  #toast.critical { border-color: var(--critica); color: var(--critica); }
+
+  .empty-col {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #475569; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="status-dot"></div>
+  <h1>Uranus2 — Central WhatsApp</h1>
+  <span id="last-update">Aguardando dados...</span>
+  <button class="btn ghost" onclick="manualRefresh()">↺ Atualizar</button>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="prioridades">Prioridades</button>
+  <button class="tab-btn" data-tab="analytics">Analytics</button>
+  <button class="tab-btn" data-tab="historico">Histórico</button>
+</div>
+
+<!-- TAB: PRIORIDADES -->
+<div class="tab-pane active" id="tab-prioridades">
+  <div class="filter-bar">
+    <input type="text" id="search-input" placeholder="Buscar por nome..." oninput="renderPriorities()">
+    <select id="type-filter" onchange="renderPriorities()">
+      <option value="">Todos os tipos</option>
+      <option value="Grupo">Grupo</option>
+      <option value="Contato">Individual</option>
+    </select>
+    <label>
+      <input type="checkbox" id="hide-resolved" onchange="renderPriorities()">
+      Ocultar resolvidos
+    </label>
+  </div>
+  <div class="priority-grid" id="priority-grid">
+    <div class="empty-col" style="grid-column:1/-1">Carregando dados...</div>
+  </div>
+</div>
+
+<!-- TAB: ANALYTICS -->
+<div class="tab-pane" id="tab-analytics">
+  <div class="summary-cards" id="summary-cards">
+    <div class="summary-card"><div class="sc-value" id="sc-total">—</div><div class="sc-label">Total conversas</div></div>
+    <div class="summary-card"><div class="sc-value" id="sc-unread">—</div><div class="sc-label">Não lidas</div></div>
+    <div class="summary-card"><div class="sc-value" id="sc-resolved">—</div><div class="sc-label">Resolvidas hoje</div></div>
+    <div class="summary-card"><div class="sc-value" id="sc-critica">—</div><div class="sc-label">Críticas</div></div>
+  </div>
+  <div class="analytics-grid">
+    <div class="analytics-card">
+      <h3>Top 10 — Mais mensagens não lidas</h3>
+      <canvas id="chart-top-senders"></canvas>
+    </div>
+    <div class="analytics-card">
+      <h3>Volume por hora do dia</h3>
+      <canvas id="chart-hourly"></canvas>
+    </div>
+    <div class="analytics-card">
+      <h3>Distribuição por prioridade</h3>
+      <canvas id="chart-priority"></canvas>
+    </div>
+    <div class="analytics-card">
+      <h3>Grupos mais ativos</h3>
+      <canvas id="chart-groups"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: HISTORICO -->
+<div class="tab-pane" id="tab-historico">
+  <div id="history-list" class="history-list">Carregando...</div>
+  <div class="history-viewer" id="history-viewer">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong id="history-viewer-title"></strong>
+      <button class="btn ghost" onclick="closeHistoryViewer()">Fechar</button>
+    </div>
+    <pre id="history-viewer-content"></pre>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let reportData = { chats: [], resolvedJids: [], lastRun: null };
+let analyticsData = null;
+let resolvedSet = new Set();
+let charts = {};
+
+// ============================================================
+// HELPERS
+// ============================================================
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'visible' + (type ? ' ' + type : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = ''; }, 4000);
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return ts;
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============================================================
+// TABS
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'analytics') loadAnalytics();
+    if (btn.dataset.tab === 'historico') loadHistory();
+  });
+});
+
+// ============================================================
+// SSE
+// ============================================================
+function initSSE() {
+  const es = new EventSource('/api/events');
+
+  es.addEventListener('cycle-complete', (e) => {
+    const data = JSON.parse(e.data);
+    applyReportData(data);
+    showToast('Ciclo de análise concluído — dados atualizados');
+  });
+
+  es.addEventListener('new-critical', (e) => {
+    const data = JSON.parse(e.data);
+    showToast('🚨 Nova mensagem CRÍTICA: ' + data.name, 'critical');
+    playBeep();
+    sendBrowserNotification('Nova mensagem crítica', data.name + ': ' + (data.summary || ''));
+  });
+
+  es.onerror = () => {
+    updateStatusDot(false);
+  };
+}
+
+// ============================================================
+// AUDIO
+// ============================================================
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch(e) { /* audio not supported */ }
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+
+function sendBrowserNotification(title, body) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '' });
+  }
+}
+
+// ============================================================
+// STATUS
+// ============================================================
+function updateStatusDot(connected) {
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot' + (connected ? ' connected' : '');
+}
+
+async function fetchStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    updateStatusDot(d.connected);
+  } catch(e) {}
+}
+
+// ============================================================
+// REPORT DATA
+// ============================================================
+function applyReportData(data) {
+  reportData = data;
+  resolvedSet = new Set(data.resolvedJids || []);
+  const lu = document.getElementById('last-update');
+  lu.textContent = data.lastRun ? 'Atualizado: ' + fmtTime(data.lastRun) : '';
+  renderPriorities();
+  // Refresh analytics if tab visible
+  if (document.getElementById('tab-analytics').classList.contains('active')) {
+    loadAnalytics();
+  }
+}
+
+async function manualRefresh() {
+  try {
+    const r = await fetch('/api/report');
+    const d = await r.json();
+    applyReportData(d);
+    showToast('Dados atualizados');
+  } catch(e) {
+    showToast('Erro ao atualizar dados');
+  }
+  fetchStatus();
+}
+
+// ============================================================
+// PRIORITIES TAB
+// ============================================================
+const PRIORITIES = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA'];
+const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA' };
+
+function renderPriorities() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const typeFilter = document.getElementById('type-filter').value;
+  const hideResolved = document.getElementById('hide-resolved').checked;
+  const grid = document.getElementById('priority-grid');
+
+  const chats = (reportData.chats || []).filter(c => {
+    if (search && !c.name.toLowerCase().includes(search)) return false;
+    if (typeFilter && c.type !== typeFilter) return false;
+    if (hideResolved && resolvedSet.has(c.jid)) return false;
+    return true;
+  });
+
+  const byPriority = {};
+  PRIORITIES.forEach(p => byPriority[p] = []);
+  chats.forEach(c => {
+    const p = PRIORITIES.includes(c.priority) ? c.priority : 'BAIXA';
+    byPriority[p].push(c);
+  });
+
+  grid.innerHTML = PRIORITIES.map(p => {
+    const list = byPriority[p];
+    const totalUnread = list.reduce((s, c) => s + (c.unreadCount || 0), 0);
+    return `
+      <div class="priority-col">
+        <div class="priority-header p-${p}">
+          ${P_LABELS[p]}
+          <span class="ph-count">${list.length} | ${totalUnread} msgs</span>
+        </div>
+        <div id="col-${p}">
+          ${list.length === 0 ? '<div class="empty-col">Sem conversas</div>' : list.map(c => cardHtml(c)).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function cardHtml(c) {
+  const resolved = resolvedSet.has(c.jid);
+  const jidEnc = encodeURIComponent(c.jid);
+  const typeBadge = c.type === 'Grupo' ? 'badge-grupo' : 'badge-individual';
+  const typeLabel = c.type === 'Grupo' ? 'Grupo' : 'Individual';
+
+  const suggestion = c.suggestedResponse
+    ? `<div class="suggestion-block">
+        ${escHtml(c.suggestedResponse)}
+        <button class="copy-btn" onclick="copyText(${JSON.stringify(c.suggestedResponse)}, this)">Copiar</button>
+       </div>`
+    : '';
+
+  const actions = c.actionItems && c.actionItems.length
+    ? `<ul class="action-items">${c.actionItems.map(a => `<li>${escHtml(a)}</li>`).join('')}</ul>`
+    : '';
+
+  const summaryId = 'sum-' + c.jid.replace(/[^a-z0-9]/gi, '_');
+
+  return `
+    <div class="card ${resolved ? 'resolved' : ''}" id="card-${jidEnc}">
+      <div class="card-top">
+        <div class="card-name">${escHtml(c.name)}</div>
+        <span class="badge ${typeBadge}">${typeLabel}</span>
+        ${c.unreadCount ? `<span class="badge badge-unread">${c.unreadCount}</span>` : ''}
+      </div>
+      <div class="card-time">${fmtTime(c.lastMessageTime)}</div>
+      <div class="card-summary collapsed" id="${summaryId}">${escHtml(c.summary)}</div>
+      <button class="expand-btn" onclick="toggleSummary('${summaryId}', this)">+ Ver mais</button>
+      ${suggestion}
+      ${actions}
+      <button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
+        ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
+      </button>
+    </div>
+  `;
+}
+
+function toggleSummary(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.classList.contains('collapsed')) {
+    el.classList.remove('collapsed');
+    btn.textContent = '− Ver menos';
+  } else {
+    el.classList.add('collapsed');
+    btn.textContent = '+ Ver mais';
+  }
+}
+
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => btn.textContent = 'Copiar', 2000);
+  });
+}
+
+async function toggleResolve(jid, btn) {
+  const isResolved = resolvedSet.has(jid);
+  const method = isResolved ? 'DELETE' : 'POST';
+  try {
+    await fetch('/api/resolve/' + encodeURIComponent(jid), { method });
+    if (isResolved) {
+      resolvedSet.delete(jid);
+    } else {
+      resolvedSet.add(jid);
+    }
+    renderPriorities();
+    updateSummaryCards();
+  } catch(e) {
+    showToast('Erro ao atualizar status');
+  }
+}
+
+// ============================================================
+// ANALYTICS TAB
+// ============================================================
+function chartDefaults() {
+  return {
+    plugins: {
+      legend: { labels: { color: '#94a3b8', font: { size: 12 } } }
+    },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(51,65,85,0.5)' } }
+    }
+  };
+}
+
+function destroyChart(key) {
+  if (charts[key]) { charts[key].destroy(); charts[key] = null; }
+}
+
+async function loadAnalytics() {
+  try {
+    const r = await fetch('/api/analytics');
+    analyticsData = await r.json();
+  } catch(e) { return; }
+
+  updateSummaryCards();
+  renderCharts();
+}
+
+function updateSummaryCards() {
+  const chats = reportData.chats || [];
+  document.getElementById('sc-total').textContent = chats.length;
+  document.getElementById('sc-unread').textContent = chats.reduce((s,c) => s + (c.unreadCount||0), 0);
+  document.getElementById('sc-resolved').textContent = resolvedSet.size;
+  document.getElementById('sc-critica').textContent = chats.filter(c => c.priority === 'CRITICA').length;
+}
+
+function renderCharts() {
+  if (!analyticsData) return;
+  const { topSenders, priorityDistribution, mostActiveGroups, hourlyVolume } = analyticsData;
+
+  // Top senders
+  destroyChart('topSenders');
+  const ctx1 = document.getElementById('chart-top-senders').getContext('2d');
+  charts.topSenders = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels: topSenders.map(s => s.name.length > 18 ? s.name.slice(0,18)+'…' : s.name),
+      datasets: [{ label: 'Não lidas', data: topSenders.map(s => s.unreadCount),
+        backgroundColor: '#3b82f6', borderRadius: 4 }]
+    },
+    options: { ...chartDefaults(), indexAxis: 'y', plugins: { legend: { display: false } } }
+  });
+
+  // Hourly volume
+  destroyChart('hourly');
+  const ctx2 = document.getElementById('chart-hourly').getContext('2d');
+  charts.hourly = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:24}, (_,i) => i + 'h'),
+      datasets: [{ label: 'Volume', data: hourlyVolume,
+        backgroundColor: '#8b5cf6', borderRadius: 3 }]
+    },
+    options: { ...chartDefaults(), plugins: { legend: { display: false } } }
+  });
+
+  // Priority donut
+  destroyChart('priority');
+  const ctx3 = document.getElementById('chart-priority').getContext('2d');
+  charts.priority = new Chart(ctx3, {
+    type: 'doughnut',
+    data: {
+      labels: ['Crítica', 'Alta', 'Média', 'Baixa'],
+      datasets: [{
+        data: [priorityDistribution.CRITICA, priorityDistribution.ALTA, priorityDistribution.MEDIA, priorityDistribution.BAIXA],
+        backgroundColor: ['#ef4444','#f97316','#eab308','#22c55e'],
+        borderColor: '#1e293b',
+        borderWidth: 3
+      }]
+    },
+    options: {
+      plugins: { legend: { position: 'right', labels: { color: '#94a3b8', padding: 14 } } },
+      cutout: '60%'
+    }
+  });
+
+  // Groups bar
+  destroyChart('groups');
+  const ctx4 = document.getElementById('chart-groups').getContext('2d');
+  charts.groups = new Chart(ctx4, {
+    type: 'bar',
+    data: {
+      labels: mostActiveGroups.map(g => g.name.length > 16 ? g.name.slice(0,16)+'…' : g.name),
+      datasets: [{ label: 'Não lidas', data: mostActiveGroups.map(g => g.unreadCount),
+        backgroundColor: '#22c55e', borderRadius: 4 }]
+    },
+    options: { ...chartDefaults(), plugins: { legend: { display: false } } }
+  });
+}
+
+// ============================================================
+// HISTORY TAB
+// ============================================================
+async function loadHistory() {
+  const list = document.getElementById('history-list');
+  try {
+    const r = await fetch('/api/history');
+    const files = await r.json();
+    if (!files.length) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Nenhum relatório salvo encontrado.</div>';
+      return;
+    }
+    list.innerHTML = files.map(f =>
+      `<div class="history-item" onclick="viewHistory('${escHtml(f.filename)}')">
+        <span class="hi-name">${escHtml(f.filename)}</span>
+        <span class="hi-badge">Ver →</span>
+       </div>`
+    ).join('');
+  } catch(e) {
+    list.textContent = 'Erro ao carregar histórico.';
+  }
+}
+
+async function viewHistory(filename) {
+  try {
+    const r = await fetch('/api/history/' + encodeURIComponent(filename));
+    const d = await r.json();
+    document.getElementById('history-viewer-title').textContent = d.filename;
+    document.getElementById('history-viewer-content').textContent = d.content;
+    const viewer = document.getElementById('history-viewer');
+    viewer.classList.add('visible');
+    viewer.scrollIntoView({ behavior: 'smooth' });
+  } catch(e) {
+    showToast('Erro ao carregar relatório');
+  }
+}
+
+function closeHistoryViewer() {
+  document.getElementById('history-viewer').classList.remove('visible');
+}
+
+// ============================================================
+// INIT
+// ============================================================
+(async function init() {
+  await manualRefresh();
+  initSSE();
+  setInterval(fetchStatus, 30000);
+})();
+</script>
+</body>
+</html>
