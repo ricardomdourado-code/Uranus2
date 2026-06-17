@@ -69,9 +69,8 @@ export async function connectToWhatsApp() {
   sock.ev.on('creds.update', saveCreds);
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Timeout ao aguardar conexão WhatsApp (5 minutos)'));
-    }, 5 * 60 * 1000);
+    // No hard timeout — first sync can take many minutes for large accounts
+    let resolved = false;
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -81,9 +80,9 @@ export async function connectToWhatsApp() {
         qrcode.generate(qr, { small: true });
       }
 
-      if (connection === 'open') {
-        clearTimeout(timeout);
-        logger.info('WhatsApp conectado com sucesso!');
+      if (connection === 'open' && !resolved) {
+        resolved = true;
+        logger.info('WhatsApp conectado com sucesso! Aguardando sincronização do histórico...');
         sockInstance = sock;
         resolve(sock);
       }
