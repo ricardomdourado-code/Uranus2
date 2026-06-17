@@ -30,13 +30,21 @@ const store = {
         this.chats.set(update.id, { ...existing, ...update });
       }
     });
+    ev.on('messages.set', ({ messages }) => {
+      for (const msg of messages) {
+        const jid = msg.key.remoteJid;
+        if (!this.messages.has(jid)) this.messages.set(jid, []);
+        this.messages.get(jid).push(msg);
+      }
+    });
     ev.on('messages.upsert', ({ messages }) => {
       for (const msg of messages) {
         const jid = msg.key.remoteJid;
         if (!this.messages.has(jid)) this.messages.set(jid, []);
         const arr = this.messages.get(jid);
-        arr.push(msg);
-        if (arr.length > 100) arr.shift();
+        // avoid duplicates
+        if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
+        if (arr.length > 500) arr.shift();
       }
     });
   },
@@ -219,22 +227,54 @@ export async function getAllChats(sock) {
  */
 export async function getChatMessages(sock, jid, limit = 50) {
   try {
-    const messages = await sock.loadMessages(jid, limit, undefined);
-    return (messages || []).map((msg) => ({
-      id: msg.key?.id,
-      fromMe: msg.key?.fromMe || false,
-      sender: msg.key?.participant || msg.key?.remoteJid || jid,
-      senderName: msg.pushName || jidToReadable(msg.key?.participant || msg.key?.remoteJid || jid),
-      text: extractMessageText(msg.message),
-      timestamp: msg.messageTimestamp
-        ? new Date(Number(msg.messageTimestamp) * 1000)
-        : null,
-      type: getMessageType(msg.message),
-    })).filter((m) => m.text || m.type !== 'unknown');
+    // First try from our in-memory store (populated during sync)
+    const stored = store.messages.get(jid) || [];
+    if (stored.length >= limit) {
+      const recent = stored.slice(-limit);
+      return formatMessages(recent, jid);
+    }
+
+    // Fallback: fetch from WhatsApp servers
+    const cursor = stored.length > 0
+      ? { before: stored[0].key }
+      : undefined;
+
+    const result = await sock.fetchMessagesFromWA(jid, limit, cursor).catch(() => null);
+    const remote = result?.messages || [];
+
+    // Merge stored + remote, deduplicate
+    const all = [...remote, ...stored];
+    const seen = new Set();
+    const merged = all.filter(m => {
+      if (seen.has(m.key.id)) return false;
+      seen.add(m.key.id);
+      return true;
+    });
+
+    // Update store with fetched messages
+    store.messages.set(jid, merged.slice(-500));
+
+    return formatMessages(merged.slice(-limit), jid);
   } catch (err) {
     logger.warn({ err, jid }, 'Erro ao carregar mensagens da conversa');
-    return [];
+    // Return whatever we have in store
+    const stored = store.messages.get(jid) || [];
+    return formatMessages(stored.slice(-limit), jid);
   }
+}
+
+function formatMessages(messages, jid) {
+  return messages.map((msg) => ({
+    id: msg.key?.id,
+    fromMe: msg.key?.fromMe || false,
+    sender: msg.key?.participant || msg.key?.remoteJid || jid,
+    senderName: msg.pushName || jidToReadable(msg.key?.participant || msg.key?.remoteJid || jid),
+    text: extractMessageText(msg.message),
+    timestamp: msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000)
+      : null,
+    type: getMessageType(msg.message),
+  })).filter((m) => m.text || m.type !== 'unknown');
 }
 
 /**
