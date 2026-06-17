@@ -6,6 +6,8 @@ import { generateReport, saveReport, printReport } from './reporter.js';
 import { startScheduler } from './scheduler.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { initServer, updateReportData } from './server.js';
+import { state } from './state.js';
 
 let sock = null;
 
@@ -59,6 +61,9 @@ async function runAnalysisCycle() {
       logger.info(`Relatório salvo: ${filePath}`);
     }
 
+    // 8. Update dashboard state
+    updateReportData(analyzedChats);
+
     logger.info('✅ Ciclo de análise concluído.');
     logger.info('─'.repeat(60));
   } catch (err) {
@@ -92,9 +97,13 @@ async function main() {
 
   setupGracefulShutdown();
 
+  // Start dashboard server
+  initServer(config.server?.port || 3000);
+
   try {
     logger.info('Conectando ao WhatsApp...');
     sock = await connectToWhatsApp();
+    state.connected = true;
 
     logger.info('Aguardando sincronização inicial do histórico (2 minutos)...');
     await new Promise((r) => setTimeout(r, 2 * 60 * 1000));
