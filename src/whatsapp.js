@@ -59,7 +59,7 @@ export async function connectToWhatsApp() {
     auth: state,
     printQRInTerminal: false,
     logger: logger.child({ module: 'baileys' }),
-    syncFullHistory: false,
+    syncFullHistory: true,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
   });

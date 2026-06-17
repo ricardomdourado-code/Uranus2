@@ -105,8 +105,8 @@ async function main() {
     sock = await connectToWhatsApp();
     state.connected = true;
 
-    logger.info('Aguardando sincronização inicial do histórico (2 minutos)...');
-    await new Promise((r) => setTimeout(r, 2 * 60 * 1000));
+    logger.info('Aguardando sincronização inicial do histórico (5 minutos)...');
+    await new Promise((r) => setTimeout(r, 5 * 60 * 1000));
 
     logger.info('🚀 Iniciando primeira leitura profunda...');
     startScheduler(runAnalysisCycle);
