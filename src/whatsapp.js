@@ -1,0 +1,256 @@
+import makeWASocket, {
+  useMultiFileAuthState,
+  makeInMemoryStore,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  jidDecode,
+} from '@whiskeysockets/baileys';
+import qrcode from 'qrcode-terminal';
+import { Boom } from '@hapi/boom';
+import { config } from './config.js';
+import { logger } from './logger.js';
+import { mkdirSync } from 'fs';
+
+// Ensure auth directory exists
+mkdirSync(config.whatsapp.authDir, { recursive: true });
+
+// In-memory store for messages and chats
+const store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) });
+
+let sockInstance = null;
+
+/**
+ * Connect to WhatsApp Web via Baileys.
+ * Returns the socket instance after the connection reaches "open" state.
+ */
+export async function connectToWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(config.whatsapp.authDir);
+  const { version } = await fetchLatestBaileysVersion();
+
+  logger.info(`Conectando ao WhatsApp (Baileys v${version.join('.')})`);
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    printQRInTerminal: false,
+    logger: logger.child({ module: 'baileys' }),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
+  });
+
+  store.bind(sock.ev);
+
+  sock.ev.on('creds.update', saveCreds);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Timeout ao aguardar conexão WhatsApp (5 minutos)'));
+    }, 5 * 60 * 1000);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        logger.info('QR Code gerado. Escaneie com seu WhatsApp:');
+        qrcode.generate(qr, { small: true });
+      }
+
+      if (connection === 'open') {
+        clearTimeout(timeout);
+        logger.info('WhatsApp conectado com sucesso!');
+        sockInstance = sock;
+        resolve(sock);
+      }
+
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error instanceof Boom
+          ? lastDisconnect.error.output.statusCode
+          : undefined;
+
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+        logger.warn(`Conexão fechada. Código: ${statusCode}. Reconectar: ${shouldReconnect}`);
+
+        if (shouldReconnect) {
+          logger.info('Tentando reconectar em 5 segundos...');
+          setTimeout(async () => {
+            try {
+              const newSock = await connectToWhatsApp();
+              sockInstance = newSock;
+            } catch (err) {
+              logger.error({ err }, 'Falha ao reconectar');
+            }
+          }, 5000);
+        } else {
+          clearTimeout(timeout);
+          reject(new Error('WhatsApp desconectado (logout). Delete ./data/auth e reinicie.'));
+        }
+      }
+    });
+  });
+}
+
+/**
+ * Returns the active socket instance (after connection).
+ */
+export function getSocket() {
+  return sockInstance;
+}
+
+/**
+ * Decode a JID to get a readable name or number.
+ */
+function jidToReadable(jid) {
+  const decoded = jidDecode(jid);
+  if (!decoded) return jid;
+  return decoded.user || jid;
+}
+
+/**
+ * Determine chat type label.
+ */
+function getChatTypeLabel(jid) {
+  if (jid.endsWith('@g.us')) return 'Grupo';
+  if (jid.endsWith('@broadcast')) return 'Lista de Transmissão';
+  return 'Contato';
+}
+
+/**
+ * Retrieve all chats with unread count, last message, timestamp, and metadata.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<Array>}
+ */
+export async function getAllChats(sock) {
+  logger.info('Buscando todas as conversas...');
+
+  // Wait a bit for store to sync chats
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const chatsMap = store.chats;
+  const chats = [];
+
+  for (const [jid, chat] of Object.entries(chatsMap.toJSON ? chatsMap.toJSON() : chatsMap)) {
+    if (!jid || jid === 'status@broadcast') continue;
+
+    const isGroup = jid.endsWith('@g.us');
+    let name = chat.name || chat.subject || jidToReadable(jid);
+    let participants = [];
+
+    if (isGroup) {
+      try {
+        const meta = await sock.groupMetadata(jid).catch(() => null);
+        if (meta) {
+          name = meta.subject || name;
+          participants = (meta.participants || []).map((p) => ({
+            jid: p.id,
+            number: jidToReadable(p.id),
+            isAdmin: p.admin != null,
+          }));
+        }
+      } catch {
+        // ignore group metadata errors
+      }
+    }
+
+    const lastMsg = chat.messages?.last?.message || null;
+    const lastMsgText = extractMessageText(lastMsg);
+    const unreadCount = chat.unreadCount || 0;
+    const timestamp = chat.conversationTimestamp
+      ? new Date(Number(chat.conversationTimestamp) * 1000)
+      : null;
+
+    chats.push({
+      jid,
+      name,
+      type: getChatTypeLabel(jid),
+      unreadCount,
+      lastMessage: lastMsgText,
+      lastMessageTime: timestamp,
+      participants,
+      isGroup,
+      isMuted: chat.mute != null && chat.mute > 0,
+      isPinned: chat.pinned != null && chat.pinned > 0,
+    });
+  }
+
+  // Sort: pinned first, then by timestamp descending
+  chats.sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    const ta = a.lastMessageTime?.getTime() || 0;
+    const tb = b.lastMessageTime?.getTime() || 0;
+    return tb - ta;
+  });
+
+  logger.info(`Total de conversas encontradas: ${chats.length}`);
+  return chats;
+}
+
+/**
+ * Fetch last N messages from a specific chat.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} jid
+ * @param {number} limit
+ * @returns {Promise<Array>}
+ */
+export async function getChatMessages(sock, jid, limit = 50) {
+  try {
+    const messages = await sock.loadMessages(jid, limit, undefined);
+    return (messages || []).map((msg) => ({
+      id: msg.key?.id,
+      fromMe: msg.key?.fromMe || false,
+      sender: msg.key?.participant || msg.key?.remoteJid || jid,
+      senderName: msg.pushName || jidToReadable(msg.key?.participant || msg.key?.remoteJid || jid),
+      text: extractMessageText(msg.message),
+      timestamp: msg.messageTimestamp
+        ? new Date(Number(msg.messageTimestamp) * 1000)
+        : null,
+      type: getMessageType(msg.message),
+    })).filter((m) => m.text || m.type !== 'unknown');
+  } catch (err) {
+    logger.warn({ err, jid }, 'Erro ao carregar mensagens da conversa');
+    return [];
+  }
+}
+
+/**
+ * Extract plain text from a WhatsApp message object.
+ */
+function extractMessageText(message) {
+  if (!message) return '';
+
+  if (message.conversation) return message.conversation;
+  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+  if (message.imageMessage?.caption) return `[Imagem] ${message.imageMessage.caption}`;
+  if (message.videoMessage?.caption) return `[Vídeo] ${message.videoMessage.caption}`;
+  if (message.documentMessage?.title) return `[Documento] ${message.documentMessage.title}`;
+  if (message.audioMessage) return '[Áudio]';
+  if (message.stickerMessage) return '[Figurinha]';
+  if (message.locationMessage) return '[Localização]';
+  if (message.contactMessage) return `[Contato] ${message.contactMessage.displayName || ''}`;
+  if (message.pollCreationMessage) return `[Enquete] ${message.pollCreationMessage.name || ''}`;
+  if (message.reactionMessage) return `[Reação] ${message.reactionMessage.text || ''}`;
+  if (message.buttonsMessage?.contentText) return message.buttonsMessage.contentText;
+  if (message.listMessage?.description) return message.listMessage.description;
+
+  return '';
+}
+
+/**
+ * Determine message type string.
+ */
+function getMessageType(message) {
+  if (!message) return 'unknown';
+  if (message.conversation || message.extendedTextMessage) return 'text';
+  if (message.imageMessage) return 'image';
+  if (message.videoMessage) return 'video';
+  if (message.audioMessage) return 'audio';
+  if (message.documentMessage) return 'document';
+  if (message.stickerMessage) return 'sticker';
+  if (message.locationMessage) return 'location';
+  if (message.contactMessage) return 'contact';
+  if (message.pollCreationMessage) return 'poll';
+  if (message.reactionMessage) return 'reaction';
+  return 'unknown';
+}
