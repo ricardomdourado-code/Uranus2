@@ -1,6 +1,5 @@
 import makeWASocket, {
   useMultiFileAuthState,
-  makeInMemoryStore,
   DisconnectReason,
   fetchLatestBaileysVersion,
   jidDecode,
@@ -14,8 +13,34 @@ import { mkdirSync } from 'fs';
 // Ensure auth directory exists
 mkdirSync(config.whatsapp.authDir, { recursive: true });
 
-// In-memory store for messages and chats
-const store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) });
+// Simple in-memory store replacement
+const store = {
+  chats: new Map(),
+  messages: new Map(),
+  bind(ev) {
+    ev.on('chats.set', ({ chats }) => {
+      for (const chat of chats) this.chats.set(chat.id, chat);
+    });
+    ev.on('chats.upsert', (chats) => {
+      for (const chat of chats) this.chats.set(chat.id, chat);
+    });
+    ev.on('chats.update', (updates) => {
+      for (const update of updates) {
+        const existing = this.chats.get(update.id) || {};
+        this.chats.set(update.id, { ...existing, ...update });
+      }
+    });
+    ev.on('messages.upsert', ({ messages }) => {
+      for (const msg of messages) {
+        const jid = msg.key.remoteJid;
+        if (!this.messages.has(jid)) this.messages.set(jid, []);
+        const arr = this.messages.get(jid);
+        arr.push(msg);
+        if (arr.length > 100) arr.shift();
+      }
+    });
+  },
+};
 
 let sockInstance = null;
 
@@ -127,10 +152,9 @@ export async function getAllChats(sock) {
   // Wait a bit for store to sync chats
   await new Promise((r) => setTimeout(r, 2000));
 
-  const chatsMap = store.chats;
   const chats = [];
 
-  for (const [jid, chat] of Object.entries(chatsMap.toJSON ? chatsMap.toJSON() : chatsMap)) {
+  for (const [jid, chat] of store.chats.entries()) {
     if (!jid || jid === 'status@broadcast') continue;
 
     const isGroup = jid.endsWith('@g.us');
