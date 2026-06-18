@@ -118,11 +118,16 @@ export async function connectToWhatsApp() {
         qrcode.generate(qr, { small: true });
       }
 
-      if (connection === 'open' && !resolved) {
-        resolved = true;
-        logger.info('WhatsApp conectado com sucesso! Aguardando sincronização do histórico...');
+      if (connection === 'open') {
         sockInstance = sock;
-        resolve(sock);
+        storeEvents.emit('socket-open');
+        if (!resolved) {
+          resolved = true;
+          logger.info('WhatsApp conectado com sucesso! Aguardando sincronização do histórico...');
+          resolve(sock);
+        } else {
+          logger.info('WhatsApp reconectado.');
+        }
       }
 
       if (connection === 'close') {
@@ -145,7 +150,6 @@ export async function connectToWhatsApp() {
             }
           }, 5000);
         } else {
-          clearTimeout(timeout);
           reject(new Error('WhatsApp desconectado (logout). Delete ./data/auth e reinicie.'));
         }
       }
@@ -158,6 +162,13 @@ export async function connectToWhatsApp() {
  */
 export function getSocket() {
   return sockInstance;
+}
+
+/**
+ * Returns current store sizes for health checks.
+ */
+export function getStoreSize() {
+  return { chats: store.chats.size, messages: store.messages.size };
 }
 
 /**
