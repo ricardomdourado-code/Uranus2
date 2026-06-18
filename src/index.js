@@ -106,20 +106,49 @@ async function main() {
 
   logger.info('Aguardando histórico do WhatsApp...');
   await new Promise((resolve) => {
+    let settled = false;
+    let lastTotal = -1;
+    let stableTicks = 0;
+    let timeout = null;
+
+    // Heartbeat: prove the app is alive and show real progress every 20s.
+    const heartbeat = setInterval(() => {
+      const { chats, messages } = getStoreSize();
+      logger.info(`⏳ Sincronizando... ${chats} conversas / ${messages} mensagens carregadas até agora.`);
+
+      // If the totals stop growing for ~1 min (3 ticks) and we already have
+      // data, the sync has effectively settled — proceed with the analysis.
+      const total = chats + messages;
+      if (total > 0 && total === lastTotal) {
+        stableTicks += 1;
+        if (stableTicks >= 3) {
+          logger.info('✅ Sincronização estabilizada — prosseguindo com a análise.');
+          settle();
+        }
+      } else {
+        stableTicks = 0;
+      }
+      lastTotal = total;
+    }, 20000);
+
+    const settle = () => {
+      if (!settled) {
+        settled = true;
+        clearInterval(heartbeat);
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+
     // If store already has data from a previous run in this process, proceed immediately
     const { chats: existingChats, messages: existingMsgs } = getStoreSize();
     if (existingChats > 0 || existingMsgs > 0) {
       logger.info(`✅ Store já contém ${existingChats} conversas / ${existingMsgs} mensagens — prosseguindo.`);
-      resolve();
+      settle();
       return;
     }
 
-    let settled = false;
-    const settle = () => {
-      if (!settled) { settled = true; resolve(); }
-    };
-
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       const { chats, messages } = getStoreSize();
       logger.warn(`Timeout de sincronização — ${chats} conversas / ${messages} mensagens carregadas até agora.`);
       settle();
@@ -127,7 +156,6 @@ async function main() {
 
     storeEvents.on('history-ready', ({ chats, messages }) => {
       logger.info(`✅ Histórico pronto: ${chats} conversas / ${messages || 0} mensagens carregadas.`);
-      clearTimeout(timeout);
       // Wait 10s more for remaining chunks
       setTimeout(settle, 10000);
     });
