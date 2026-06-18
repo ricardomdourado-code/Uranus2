@@ -9,16 +9,18 @@ import { Boom } from '@hapi/boom';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { mkdirSync } from 'fs';
+import EventEmitter from 'events';
 
 // Ensure auth directory exists
 mkdirSync(config.whatsapp.authDir, { recursive: true });
+
+export const storeEvents = new EventEmitter();
 
 // Simple in-memory store replacement
 const store = {
   chats: new Map(),
   messages: new Map(),
   bind(ev) {
-    // Main history event (fires on first sync with all chats+messages)
     ev.on('messaging-history.set', ({ chats: historicChats, messages: historicMessages, isLatest }) => {
       logger.info(`messaging-history.set: ${historicChats?.length || 0} chats, ${historicMessages?.length || 0} msgs, isLatest=${isLatest}`);
       for (const chat of (historicChats || [])) this.chats.set(chat.id, chat);
@@ -29,9 +31,15 @@ const store = {
         const arr = this.messages.get(jid);
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
       }
+      // Emit ready when we have chats loaded
+      if (this.chats.size > 0) {
+        storeEvents.emit('history-ready', { chats: this.chats.size, isLatest });
+      }
     });
     ev.on('chats.set', ({ chats }) => {
       for (const chat of (chats || [])) this.chats.set(chat.id, chat);
+      if (this.chats.size > 0) storeEvents.emit('history-ready', { chats: this.chats.size });
+    });
     });
     ev.on('chats.upsert', (chats) => {
       for (const chat of (chats || [])) this.chats.set(chat.id, chat);

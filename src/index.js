@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { connectToWhatsApp, getSocket } from './whatsapp.js';
+import { connectToWhatsApp, getSocket, storeEvents } from './whatsapp.js';
 import { getAllChats, getChatMessages } from './whatsapp.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
@@ -101,8 +101,20 @@ async function main() {
   logger.info('Conectando ao WhatsApp...');
   await waitForConnection();
 
-  logger.info('Aguardando sincronização inicial (3 minutos)...');
-  await new Promise((r) => setTimeout(r, 3 * 60 * 1000));
+  logger.info('Aguardando histórico do WhatsApp...');
+  await new Promise((resolve) => {
+    // Resolve as soon as chats are loaded, or after 5 min max
+    const timeout = setTimeout(() => {
+      logger.warn('Timeout de sincronização — iniciando com o que foi carregado.');
+      resolve();
+    }, 5 * 60 * 1000);
+    storeEvents.once('history-ready', ({ chats }) => {
+      logger.info(`✅ Histórico pronto: ${chats} conversas carregadas.`);
+      clearTimeout(timeout);
+      // Wait 10s more for remaining chunks
+      setTimeout(resolve, 10000);
+    });
+  });
 
   logger.info('🚀 Iniciando primeira leitura profunda...');
   startScheduler(runAnalysisCycle);
