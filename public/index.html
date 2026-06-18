@@ -1006,24 +1006,34 @@ function copyReply(btn) {
 async function sendReply() {
   const text = document.getElementById('modal-reply-text').value.trim();
   if (!text) { showToast('Escreva uma resposta primeiro'); return; }
+  const btn = document.getElementById('modal-send-btn');
   const hint = document.getElementById('modal-hint');
 
-  if (modalChat.phone) {
-    // Individual contact with a real number: open WhatsApp with the text ready
-    // for review (WhatsApp's own send screen).
-    const url = 'https://wa.me/' + modalChat.phone + '?text=' + encodeURIComponent(text);
-    window.open(url, '_blank');
-    hint.textContent = 'Abrindo o WhatsApp com sua mensagem pronta. Movida para Respondidas.';
-  } else {
-    // Group or hidden number: wa.me has no deep link, so copy + open WhatsApp Web.
-    try { await navigator.clipboard.writeText(text); } catch(e) {}
-    window.open('https://web.whatsapp.com', '_blank');
-    hint.textContent = 'Copiei sua mensagem — cole (Ctrl+V) no WhatsApp Web. Movida para Respondidas.';
-  }
+  btn.disabled = true;
+  btn.textContent = '⏳ Enviando...';
 
-  // Sending a reply moves the conversation to "Respondidas". It returns to the
-  // panel automatically when a new incoming message arrives.
-  await markReplied(modalChat.jid);
+  try {
+    const r = await fetch('/api/send/' + encodeURIComponent(modalChat.jid), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Erro ao enviar');
+
+    hint.textContent = '✅ Mensagem enviada com sucesso!';
+    btn.textContent = '✅ Enviado';
+    document.getElementById('modal-reply-text').value = '';
+
+    // Move to "Respondidas"
+    await markReplied(modalChat.jid);
+
+    setTimeout(() => closeChatModal(), 1500);
+  } catch (err) {
+    hint.textContent = '❌ Falha no envio: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = '📤 Enviar no WhatsApp';
+  }
 }
 
 async function markReplied(jid) {
