@@ -341,7 +341,20 @@ export async function getAllChats(sock, options = {}) {
   const chats = [];
   for (const { jid, chat, lastTs, unreadCount, lastMsg } of selected) {
     const isGroup = jid.endsWith('@g.us');
-    let name = chat.name || chat.subject || store.resolveName(jid) || jidToReadable(jid);
+    // For individual chats, fall back to the most recent pushName found in the
+    // stored messages — this resolves raw numbers / @lid identifiers to the
+    // sender's WhatsApp display name.
+    let pushNameFromMsgs = null;
+    if (!isGroup) {
+      const msgs = store.messages.get(jid) || [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (!msgs[i].key?.fromMe && msgs[i].pushName) {
+          pushNameFromMsgs = msgs[i].pushName;
+          break;
+        }
+      }
+    }
+    let name = chat.name || chat.subject || store.resolveName(jid) || pushNameFromMsgs || jidToReadable(jid);
     let participants = [];
 
     if (isGroup) {
