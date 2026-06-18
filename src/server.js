@@ -14,6 +14,15 @@ import OpenAI from 'openai';
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Never cache HTML so dashboard updates always reach the browser immediately.
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
 app.use(express.static(join(process.cwd(), 'public')));
 
 // --- REST API ---
