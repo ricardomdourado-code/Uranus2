@@ -305,20 +305,42 @@ function getChatTypeLabel(jid) {
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @returns {Promise<Array>}
  */
-export async function getAllChats(sock) {
+export async function getAllChats(sock, options = {}) {
+  const { activeDays = 7, max = 80 } = options;
   logger.info('Buscando todas as conversas...');
 
   // Wait a bit for store to sync chats
   await new Promise((r) => setTimeout(r, 2000));
 
-  const chats = [];
+  const cutoff = activeDays > 0 ? Date.now() - activeDays * 24 * 60 * 60 * 1000 : 0;
 
+  // First pass: lightweight list with real last-message time (no group metadata yet).
+  const candidates = [];
   for (const [jid, chat] of store.chats.entries()) {
     if (!jid || jid === 'status@broadcast') continue;
 
+    const msgs = store.messages.get(jid) || [];
+    const lastMsg = msgs[msgs.length - 1];
+    const lastTs = lastMsg?.messageTimestamp
+      ? Number(lastMsg.messageTimestamp) * 1000
+      : (chat.conversationTimestamp ? Number(chat.conversationTimestamp) * 1000 : 0);
+    const unreadCount = chat.unreadCount || 0;
+
+    // Keep only chats active within the window OR with unread messages.
+    if (cutoff > 0 && lastTs < cutoff && unreadCount === 0) continue;
+
+    candidates.push({ jid, chat, lastTs, unreadCount, lastMsg });
+  }
+
+  // Sort by recency and cap, so we only enrich/analyze the most relevant ones.
+  candidates.sort((a, b) => b.lastTs - a.lastTs);
+  const totalActive = candidates.length;
+  const selected = max > 0 ? candidates.slice(0, max) : candidates;
+  logger.info(`${store.chats.size} conversas no total | ${totalActive} ativas (últimos ${activeDays}d / não lidas) | analisando ${selected.length}`);
+
+  const chats = [];
+  for (const { jid, chat, lastTs, unreadCount, lastMsg } of selected) {
     const isGroup = jid.endsWith('@g.us');
-    // Prefer: saved chat/group subject > contact name > pushName captured on chat
-    // > last resort the readable number/LID.
     let name = chat.name || chat.subject || store.resolveName(jid) || jidToReadable(jid);
     let participants = [];
 
@@ -338,12 +360,8 @@ export async function getAllChats(sock) {
       }
     }
 
-    const lastMsg = chat.messages?.last?.message || null;
-    const lastMsgText = extractMessageText(lastMsg);
-    const unreadCount = chat.unreadCount || 0;
-    const timestamp = chat.conversationTimestamp
-      ? new Date(Number(chat.conversationTimestamp) * 1000)
-      : null;
+    const lastMsgText = extractMessageText(lastMsg?.message);
+    const timestamp = lastTs ? new Date(lastTs) : null;
 
     chats.push({
       jid,

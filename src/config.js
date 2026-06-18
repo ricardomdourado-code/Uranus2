@@ -17,6 +17,10 @@ export const config = {
   analysis: {
     maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '10', 10),
     batchSize: 10,
+    // Only analyze conversations active within this many days (or with unread msgs).
+    activeDays: parseInt(process.env.ANALYSIS_ACTIVE_DAYS || '7', 10),
+    // Cap the number of conversations sent to GPT per cycle (cost/rate control).
+    maxChats: parseInt(process.env.ANALYSIS_MAX_CHATS || '80', 10),
   },
   reports: {
     save: process.env.SAVE_REPORTS !== 'false',

@@ -24,8 +24,11 @@ async function runAnalysisCycle() {
   logger.info('🔍 Iniciando ciclo de leitura e análise...');
 
   try {
-    const chats = await getAllChats(sock);
-    logger.info(`${chats.length} conversas encontradas.`);
+    const chats = await getAllChats(sock, {
+      activeDays: config.analysis.activeDays,
+      max: config.analysis.maxChats,
+    });
+    logger.info(`${chats.length} conversas selecionadas para análise.`);
 
     if (chats.length === 0) {
       logger.warn('Nenhuma conversa encontrada. Tentando novamente em 5 minutos...');
