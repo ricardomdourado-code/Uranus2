@@ -216,6 +216,7 @@ export async function classifyAndSummarizeChats(chatsWithMessages) {
           unreadCount: original?.unreadCount || 0,
           lastMessageTime: original?.lastMessageTime || null,
           type: original?.type || 'Contato',
+          mentionedOwner: original?.mentionedOwner || false,
         });
       }
 
@@ -236,6 +237,7 @@ export async function classifyAndSummarizeChats(chatsWithMessages) {
             unreadCount: original?.unreadCount || 0,
             lastMessageTime: original?.lastMessageTime || null,
             type: original?.type || 'Contato',
+            mentionedOwner: original?.mentionedOwner || false,
           });
         }
       }

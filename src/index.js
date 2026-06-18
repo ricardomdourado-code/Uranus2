@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { connectToWhatsApp, getSocket, storeEvents, getStoreSize, loadStore, flushStore } from './whatsapp.js';
-import { getAllChats, getChatMessages } from './whatsapp.js';
+import { getAllChats, getChatMessages, chatMentionsOwner } from './whatsapp.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
 import { startScheduler } from './scheduler.js';
@@ -38,12 +38,29 @@ async function runAnalysisCycle() {
 
     lastAnalysisTime = Date.now();
 
-    // Split out conversations the user moved to "Geral": they are NOT sent to
+    // Split out conversations the user moved to "Diversos": they are NOT sent to
     // GPT (saves tokens) and won't affect indicators, but still appear listed.
+    // EXCEPTION: if a "Diversos" chat recently mentions the owner by name
+    // (e.g. "@ricardo"), it is pulled back into the analysis automatically.
     const ignored = state.ignoredJids;
-    const toAnalyze = chats.filter((c) => !ignored.has(c.jid));
+    const ownerAliases = [config.whatsapp.ownerName, 'Ricardo'].filter(Boolean);
+
+    const mentionedJids = new Set();
+    for (const c of chats) {
+      if (ignored.has(c.jid) && chatMentionsOwner(c.jid, ownerAliases)) {
+        mentionedJids.add(c.jid);
+      }
+    }
+    if (mentionedJids.size > 0) {
+      logger.info(`${mentionedJids.size} conversa(s) em "Diversos" mencionam você — retornando ao painel.`);
+    }
+
+    const isHidden = (jid) => ignored.has(jid) && !mentionedJids.has(jid);
+    const toAnalyze = chats
+      .filter((c) => !isHidden(c.jid))
+      .map((c) => (mentionedJids.has(c.jid) ? { ...c, mentionedOwner: true } : c));
     const generalChats = chats
-      .filter((c) => ignored.has(c.jid))
+      .filter((c) => isHidden(c.jid))
       .map((c) => ({
         jid: c.jid,
         name: c.name,

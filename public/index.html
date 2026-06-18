@@ -247,6 +247,7 @@
   .badge-grupo { background: rgba(59,130,246,0.2); color: #60a5fa; }
   .badge-individual { background: rgba(168,85,247,0.2); color: #c084fc; }
   .badge-unread { background: var(--critica); color: #fff; }
+  .badge-mention { background: rgba(234,179,8,0.25); color: #facc15; font-weight: 700; }
 
   .card-time {
     color: var(--text-muted);
@@ -820,7 +821,7 @@ async function manualRefresh() {
 // ============================================================
 const PRIORITIES = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA'];
 const COLUMNS = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA', 'GERAL'];
-const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'GERAL' };
+const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'DIVERSOS' };
 
 function renderPriorities() {
   const search = document.getElementById('search-input').value.toLowerCase();
@@ -838,8 +839,9 @@ function renderPriorities() {
   const byPriority = {};
   COLUMNS.forEach(p => byPriority[p] = []);
   chats.forEach(c => {
-    // Ignored conversations always go to the GERAL column, regardless of priority.
-    if (ignoredSet.has(c.jid)) { byPriority.GERAL.push(c); return; }
+    // Ignored conversations go to the DIVERSOS column — UNLESS they mention the
+    // owner by name (@ricardo), in which case they return to their priority.
+    if (ignoredSet.has(c.jid) && !c.mentionedOwner) { byPriority.GERAL.push(c); return; }
     const p = PRIORITIES.includes(c.priority) ? c.priority : 'BAIXA';
     byPriority[p].push(c);
   });
@@ -887,6 +889,7 @@ function cardHtml(c) {
         <div class="card-name">${escHtml(c.name)}</div>
         <span class="badge ${typeBadge}">${typeLabel}</span>
         ${c.unreadCount ? `<span class="badge badge-unread">${c.unreadCount}</span>` : ''}
+        ${c.mentionedOwner ? '<span class="badge badge-mention" title="Mencionou você">@você</span>' : ''}
       </div>
       <div class="card-time">${fmtTime(c.lastMessageTime)}</div>
       <div class="card-summary collapsed card-clickable" id="${summaryId}" onclick="openChatModal(${JSON.stringify(c.jid)})">${escHtml(c.summary)}</div>
@@ -899,7 +902,7 @@ function cardHtml(c) {
           ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
         </button>`}
         <button class="ignore-btn ${ignored ? 'ignored' : ''}" onclick="toggleIgnore(${JSON.stringify(c.jid)})">
-          ${ignored ? '↩ Restaurar' : '✕ Mover p/ Geral'}
+          ${ignored ? '↩ Restaurar' : '✕ Mover p/ Diversos'}
         </button>
       </div>
     </div>

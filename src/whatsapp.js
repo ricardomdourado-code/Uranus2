@@ -441,6 +441,43 @@ export function getRecentMessages(jid, limit = 20) {
 }
 
 /**
+ * Check whether any of the most recent messages in a chat mention the owner
+ * by name (e.g. "@ricardo", "Ricardo"). Used to pull conversations back out of
+ * the "Diversos" column when the user is directly addressed.
+ * @param {string} jid
+ * @param {string[]} names - candidate names/aliases to look for
+ * @param {number} limit - how many recent messages to scan
+ */
+export function chatMentionsOwner(jid, names = [], limit = 30) {
+  const stored = store.messages.get(jid) || [];
+  const recent = stored.slice(-limit);
+  // Build word-boundary regexes for each name token (first name, full name…).
+  const needles = names
+    .flatMap((n) => [n, ...n.split(/\s+/)])
+    .map((n) => n.trim().toLowerCase())
+    .filter((n) => n.length >= 3);
+  if (needles.length === 0) return false;
+
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i];
+    if (msg.key?.fromMe) continue; // a message I sent doesn't "mention" me
+    const text = (extractMessageText(msg.message) || '').toLowerCase();
+    if (!text) continue;
+    for (const needle of needles) {
+      // Match "@ricardo" or the name as a standalone word.
+      if (text.includes('@' + needle) || new RegExp(`\\b${escapeRegex(needle)}\\b`).test(text)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Best-effort phone number (digits only) for a chat, for building wa.me links.
  * Returns null for groups and @lid identifiers (no usable phone number).
  */
