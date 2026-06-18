@@ -7,7 +7,7 @@ import makeWASocket, {
 import qrcode from 'qrcode-terminal';
 import { Boom } from '@hapi/boom';
 import { config } from './config.js';
-import { logger } from './logger.js';
+import { logger, baileysLogger } from './logger.js';
 import { mkdirSync } from 'fs';
 import EventEmitter from 'events';
 
@@ -97,7 +97,7 @@ export async function connectToWhatsApp() {
     version,
     auth: state,
     printQRInTerminal: false,
-    logger: logger.child({ module: 'baileys', level: 'warn' }),
+    logger: baileysLogger,
     syncFullHistory: true,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,

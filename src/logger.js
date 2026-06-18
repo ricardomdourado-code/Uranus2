@@ -19,4 +19,15 @@ export const logger = pino(
   transport
 );
 
+// Dedicated logger for Baileys internals. Set to 'silent' to suppress the
+// harmless but noisy decrypt/prekey/resync errors that occur while syncing
+// old history. Override with BAILEYS_LOG_LEVEL=warn for debugging.
+export const baileysLogger = pino(
+  {
+    level: process.env.BAILEYS_LOG_LEVEL || 'silent',
+    timestamp: pino.stdTimeFunctions.isoTime,
+  },
+  transport
+);
+
 export default logger;
