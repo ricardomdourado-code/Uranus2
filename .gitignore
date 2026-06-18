@@ -1,5 +1,8 @@
 node_modules/
 data/auth/
+data/store.json
+data/groups.json
+data/delegates.json
 .env
 reports/
 *.log

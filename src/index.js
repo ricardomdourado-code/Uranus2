@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { connectToWhatsApp, getSocket, storeEvents, getStoreSize } from './whatsapp.js';
+import { connectToWhatsApp, getSocket, storeEvents, getStoreSize, loadStore, flushStore } from './whatsapp.js';
 import { getAllChats, getChatMessages } from './whatsapp.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
@@ -67,7 +67,8 @@ async function runAnalysisCycle() {
 
 function setupGracefulShutdown() {
   const shutdown = () => {
-    logger.info('Encerrando aplicação...');
+    logger.info('Encerrando aplicação... salvando histórico.');
+    try { flushStore(); } catch { /* ignore */ }
     process.exit(0);
   };
   process.on('SIGINT', shutdown);
@@ -85,6 +86,7 @@ async function main() {
   setupGracefulShutdown();
   initServer(config.server?.port || 3000);
   await loadPersistedData();
+  loadStore(); // restore previously synced WhatsApp history from disk
   initMorningBrief(getSocket);
 
   const waitForConnection = () => new Promise((resolve) => {

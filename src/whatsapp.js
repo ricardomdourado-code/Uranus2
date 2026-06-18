@@ -8,7 +8,8 @@ import qrcode from 'qrcode-terminal';
 import { Boom } from '@hapi/boom';
 import { config } from './config.js';
 import { logger, baileysLogger } from './logger.js';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { resolve as resolvePath } from 'path';
 import EventEmitter from 'events';
 
 // Ensure auth directory exists
@@ -16,10 +17,59 @@ mkdirSync(config.whatsapp.authDir, { recursive: true });
 
 export const storeEvents = new EventEmitter();
 
+// Where the synced history is persisted so it survives restarts.
+const STORE_FILE = resolvePath('./data/store.json');
+// Keep at most this many messages per chat on disk (analysis only uses ~10).
+const MAX_PERSISTED_PER_CHAT = 50;
+
+let saveTimer = null;
+
 // Simple in-memory store replacement
 const store = {
   chats: new Map(),
   messages: new Map(),
+
+  /** Load persisted chats/messages from disk into memory (called on startup). */
+  load() {
+    try {
+      if (!existsSync(STORE_FILE)) return;
+      const raw = JSON.parse(readFileSync(STORE_FILE, 'utf-8'));
+      for (const [id, chat] of Object.entries(raw.chats || {})) {
+        this.chats.set(id, chat);
+      }
+      for (const [jid, msgs] of Object.entries(raw.messages || {})) {
+        this.messages.set(jid, msgs);
+      }
+      const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
+      logger.info(`💾 Histórico carregado do disco: ${this.chats.size} conversas, ${totalMsgs} mensagens.`);
+    } catch (err) {
+      logger.warn({ err }, 'Não foi possível carregar o histórico salvo (começando vazio).');
+    }
+  },
+
+  /** Persist current store to disk, debounced to avoid excessive writes. */
+  scheduleSave() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      this.save();
+    }, 5000);
+  },
+
+  save() {
+    try {
+      const chats = {};
+      for (const [id, chat] of this.chats.entries()) chats[id] = chat;
+      const messages = {};
+      for (const [jid, msgs] of this.messages.entries()) {
+        messages[jid] = msgs.slice(-MAX_PERSISTED_PER_CHAT);
+      }
+      writeFileSync(STORE_FILE, JSON.stringify({ chats, messages }));
+    } catch (err) {
+      logger.warn({ err }, 'Falha ao salvar histórico no disco.');
+    }
+  },
+
   bind(ev) {
     ev.on('messaging-history.set', ({ chats: historicChats, messages: historicMessages, isLatest }) => {
       logger.info(`messaging-history.set: ${historicChats?.length || 0} chats, ${historicMessages?.length || 0} msgs, isLatest=${isLatest}`);
@@ -43,6 +93,7 @@ const store = {
       const totalChats = this.chats.size;
       const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
       logger.info(`📊 Store acumulado: ${totalChats} conversas, ${totalMsgs} mensagens no total`);
+      this.scheduleSave();
       if (totalChats > 0 || totalMsgs > 0) {
         storeEvents.emit('history-ready', { chats: totalChats, messages: totalMsgs, isLatest });
       }
@@ -76,7 +127,14 @@ const store = {
         const arr = this.messages.get(jid);
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
         if (arr.length > 500) arr.shift();
+        // Track new incoming messages as unread on the chat entry
+        if (!this.chats.has(jid)) this.chats.set(jid, { id: jid, unreadCount: 0, name: null });
+        if (!msg.key?.fromMe) {
+          const chat = this.chats.get(jid);
+          chat.unreadCount = (chat.unreadCount || 0) + 1;
+        }
       }
+      this.scheduleSave();
     });
   },
 };
@@ -170,6 +228,21 @@ export function getSocket() {
  */
 export function getStoreSize() {
   return { chats: store.chats.size, messages: store.messages.size };
+}
+
+/**
+ * Load persisted history from disk into the in-memory store.
+ * Call once at startup, before connecting.
+ */
+export function loadStore() {
+  store.load();
+}
+
+/**
+ * Force an immediate save of the store to disk (e.g. on shutdown).
+ */
+export function flushStore() {
+  store.save();
 }
 
 /**
