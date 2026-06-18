@@ -40,7 +40,6 @@ const store = {
       for (const chat of (chats || [])) this.chats.set(chat.id, chat);
       if (this.chats.size > 0) storeEvents.emit('history-ready', { chats: this.chats.size });
     });
-    });
     ev.on('chats.upsert', (chats) => {
       for (const chat of (chats || [])) this.chats.set(chat.id, chat);
     });
