@@ -520,10 +520,11 @@ export function getChatPhone(jid) {
 /**
  * Send a text message to a chat via the active socket.
  */
-export async function sendTextMessage(jid, text) {
+export async function sendTextMessage(jid, text, mentions = []) {
   const sock = getSocket();
   if (!sock) throw new Error('WhatsApp não conectado');
-  await sock.sendMessage(jid, { text });
+  const content = mentions && mentions.length > 0 ? { text, mentions } : { text };
+  await sock.sendMessage(jid, content);
 }
 
 function formatMessages(messages, jid) {

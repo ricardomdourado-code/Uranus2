@@ -279,6 +279,72 @@
   .badge-unread { background: var(--critica); color: #fff; }
   .badge-mention { background: rgba(234,179,8,0.25); color: #facc15; font-weight: 700; }
 
+  /* MENTION FILTER BUTTON */
+  #mention-btn {
+    background: rgba(234,179,8,0.15);
+    border: 1px solid rgba(234,179,8,0.4);
+    color: #facc15;
+    border-radius: 6px;
+    padding: 5px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+  #mention-btn:hover, #mention-btn.active { background: rgba(234,179,8,0.3); }
+
+  /* PERSON PROFILE PANEL */
+  #person-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid rgba(59,130,246,0.4);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  #person-panel.visible { display: block; }
+  .person-title { font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 10px; }
+  .person-chats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .person-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color 0.2s;
+  }
+  .person-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .person-chip.direct { border-color: #8b5cf6; color: #c084fc; }
+
+  /* PARTICIPANT MENTION PICKER */
+  .mention-picker {
+    display: none;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .mention-picker.visible { display: flex; }
+  .mention-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .mention-chip:hover { border-color: #60a5fa; color: #60a5fa; }
+  .mention-chip.selected { background: rgba(59,130,246,0.2); border-color: var(--accent); color: #93c5fd; }
+
   .card-time {
     color: var(--text-muted);
     font-size: 11px;
@@ -614,6 +680,7 @@
   <div class="status-dot" id="status-dot"></div>
   <h1>Uranus2 — Central WhatsApp</h1>
   <span id="last-update">Aguardando dados...</span>
+  <button id="mention-btn" onclick="toggleMentionFilter()" title="Filtrar conversas que mencionaram você" style="display:none;">🔔 <span id="mention-count">0</span> menções</button>
   <button class="btn ghost" onclick="manualRefresh()">↺ Atualizar</button>
 </header>
 
@@ -626,7 +693,7 @@
 <!-- TAB: PRIORIDADES -->
 <div class="tab-pane active" id="tab-prioridades">
   <div class="filter-bar">
-    <input type="text" id="search-input" placeholder="Buscar por nome, resumo ou mensagem..." oninput="renderPriorities()">
+    <input type="text" id="search-input" placeholder="Buscar por nome, resumo, mensagem ou participante..." oninput="renderPriorities()">
     <select id="type-filter" onchange="renderPriorities()">
       <option value="">Todos os tipos</option>
       <option value="Grupo">Grupo</option>
@@ -636,6 +703,10 @@
       <input type="checkbox" id="hide-resolved" onchange="renderPriorities()">
       Ocultar resolvidos
     </label>
+  </div>
+  <div id="person-panel">
+    <div class="person-title" id="person-title"></div>
+    <div class="person-chats" id="person-chats"></div>
   </div>
   <div class="priority-grid" id="priority-grid">
     <div class="empty-col" style="grid-column:1/-1">Carregando dados...</div>
@@ -700,6 +771,7 @@
     <div class="modal-reply">
       <label class="reply-label">Sua resposta</label>
       <textarea id="modal-reply-text" class="reply-textarea" rows="4" placeholder="Escreva ou gere uma resposta com IA..."></textarea>
+      <div id="mention-picker" class="mention-picker" title="Clique para marcar participantes na mensagem"></div>
       <input id="modal-reply-instruction" class="reply-instruction" placeholder="(Opcional) Instrução para a IA: ex. 'seja mais formal', 'peça o prazo'" />
       <div class="modal-actions">
         <button class="btn" id="modal-summary-btn" onclick="summarizeChat()">🧠 Resumir conversa</button>
@@ -721,6 +793,8 @@ let analyticsData = null;
 let resolvedSet = new Set();
 let ignoredSet = new Set();
 let charts = {};
+let mentionFilterActive = false;
+let selectedMentions = []; // JIDs of participants to @mention in current reply
 
 // ============================================================
 // HELPERS
@@ -772,7 +846,14 @@ function initSSE() {
   });
 
   es.addEventListener('message-activity', (e) => {
-    try { applyMessageActivity(JSON.parse(e.data)); } catch (err) {}
+    try {
+      const act = JSON.parse(e.data);
+      applyMessageActivity(act);
+      if (act.mentionedOwner) {
+        showToast('🔔 @você foi mencionado em: ' + (act.name || act.jid));
+        updateMentionBadge();
+      }
+    } catch (err) {}
   });
 
   es.addEventListener('new-critical', (e) => {
@@ -844,11 +925,28 @@ function applyReportData(data) {
   ignoredSet = new Set(data.ignoredJids || []);
   const lu = document.getElementById('last-update');
   lu.textContent = data.lastRun ? 'Atualizado: ' + fmtTime(data.lastRun) : '';
+  updateMentionBadge();
   renderPriorities();
-  // Refresh analytics if tab visible
   if (document.getElementById('tab-analytics').classList.contains('active')) {
     loadAnalytics();
   }
+}
+
+function updateMentionBadge() {
+  const mentions = (reportData.chats || []).filter(
+    c => c.mentionedOwner && !ignoredSet.has(c.jid) && !resolvedSet.has(c.jid)
+  );
+  const btn = document.getElementById('mention-btn');
+  const cnt = document.getElementById('mention-count');
+  cnt.textContent = mentions.length;
+  btn.style.display = mentions.length > 0 ? '' : 'none';
+}
+
+function toggleMentionFilter() {
+  mentionFilterActive = !mentionFilterActive;
+  const btn = document.getElementById('mention-btn');
+  btn.classList.toggle('active', mentionFilterActive);
+  renderPriorities();
 }
 
 // Live update from an incoming WhatsApp message — refreshes the card instantly
@@ -903,6 +1001,56 @@ function normalize(s) {
   return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+function renderPersonPanel(search) {
+  const panel = document.getElementById('person-panel');
+  const titleEl = document.getElementById('person-title');
+  const chatsEl = document.getElementById('person-chats');
+  if (!search || search.length < 2) { panel.classList.remove('visible'); return; }
+
+  // Find matching participants across all chats
+  const allChats = reportData.chats || [];
+  const matchMap = new Map(); // normalized-name -> { displayName, matches: [{jid, name, isDirect}] }
+  for (const c of allChats) {
+    if (!c.participants || !c.participants.length) continue;
+    for (const p of c.participants) {
+      const pname = p.name || p.number || '';
+      if (!pname) continue;
+      const key = normalize(pname);
+      if (!key.includes(search)) continue;
+      if (!matchMap.has(key)) matchMap.set(key, { displayName: pname, matches: [] });
+      matchMap.get(key).matches.push({ jid: c.jid, name: c.name, isDirect: c.type !== 'Grupo' });
+    }
+    // Also check if it's a direct chat matching the name
+    if (normalize(c.name).includes(search) && c.type !== 'Grupo') {
+      const key = normalize(c.name);
+      if (!matchMap.has(key)) matchMap.set(key, { displayName: c.name, matches: [] });
+      const already = matchMap.get(key).matches.find(m => m.jid === c.jid);
+      if (!already) matchMap.get(key).matches.push({ jid: c.jid, name: c.name, isDirect: true });
+    }
+  }
+
+  if (matchMap.size === 0) { panel.classList.remove('visible'); return; }
+
+  let html = '';
+  for (const [, { displayName, matches }] of matchMap) {
+    const uniqueMatches = [...new Map(matches.map(m => [m.jid, m])).values()];
+    html += `<div style="margin-bottom:10px;">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">
+        👤 <strong style="color:var(--text)">${escHtml(displayName)}</strong> aparece em ${uniqueMatches.length} conversa(s):
+      </div>
+      <div class="person-chats">
+        ${uniqueMatches.map(m => `<span class="person-chip ${m.isDirect ? 'direct' : ''}" onclick="openChatModal('${m.jid}')" title="${escHtml(m.name)}">
+          ${m.isDirect ? '👤' : '👥'} ${escHtml(m.name)}
+        </span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  titleEl.innerHTML = `Resultados de pessoa para "<em>${escHtml(search)}</em>"`;
+  chatsEl.innerHTML = html;
+  panel.classList.add('visible');
+}
+
 function renderPriorities() {
   const raw = document.getElementById('search-input').value;
   const search = normalize(raw);
@@ -910,9 +1058,11 @@ function renderPriorities() {
   const hideResolved = document.getElementById('hide-resolved').checked;
   const grid = document.getElementById('priority-grid');
 
+  renderPersonPanel(search);
+
   const chats = (reportData.chats || []).filter(c => {
+    if (mentionFilterActive && !c.mentionedOwner) return false;
     if (search) {
-      // Build haystack: name, summary, last message, participants (for groups)
       const parts = [c.name, c.summary, c.lastMessage, c.priorityReason];
       if (c.participants && c.participants.length) {
         c.participants.forEach(p => parts.push(p.name || p.number || ''));
@@ -1032,6 +1182,9 @@ async function openChatModal(jid) {
   document.getElementById('modal-summary-box').innerHTML = '';
   document.getElementById('modal-participants').style.display = 'none';
   document.getElementById('modal-participants').innerHTML = '';
+  document.getElementById('mention-picker').innerHTML = '';
+  document.getElementById('mention-picker').classList.remove('visible');
+  selectedMentions = [];
 
   try {
     const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
@@ -1043,12 +1196,27 @@ async function openChatModal(jid) {
     document.getElementById('modal-sub').textContent =
       (d.type || '') + (d.phone ? ' · +' + d.phone : ' · sem nº direto (grupo/oculto)');
 
-    // Group participants (item #2)
+    // Group participants (item #2) + mention picker (item #1)
     const pbox = document.getElementById('modal-participants');
     if (d.participants && d.participants.length) {
       pbox.style.display = 'block';
       pbox.innerHTML = `<strong>👥 Participantes (${d.participants.length}):</strong> ` +
         d.participants.map(p => escHtml(p.name || p.number || '')).filter(Boolean).join(' · ');
+
+      // Mention picker — only for groups
+      if (d.type === 'Grupo') {
+        const picker = document.getElementById('mention-picker');
+        const validParticipants = d.participants.filter(p => p.jid && (p.name || p.number));
+        if (validParticipants.length) {
+          picker.innerHTML = '<span style="font-size:11px;color:var(--text-muted);margin-right:6px;">Marcar:</span>' +
+            validParticipants.map(p => {
+              const label = escHtml(p.name || p.number || '');
+              const pjid = escHtml(p.jid || '');
+              return `<span class="mention-chip" data-jid="${pjid}" onclick="toggleMentionChip(this,'${pjid}','${label}')">${label}</span>`;
+            }).join('');
+          picker.classList.add('visible');
+        }
+      }
     }
 
     const msgs = d.messages || [];
@@ -1092,6 +1260,22 @@ async function summarizeChat() {
     box.innerHTML = '<span style="color:var(--critica)">Erro ao gerar o resumo.</span>';
   } finally {
     btn.disabled = false; btn.textContent = '🧠 Resumir conversa';
+  }
+}
+
+function toggleMentionChip(el, jid, name) {
+  const idx = selectedMentions.indexOf(jid);
+  if (idx === -1) {
+    selectedMentions.push(jid);
+    el.classList.add('selected');
+    // Append @name to textarea
+    const ta = document.getElementById('modal-reply-text');
+    const cur = ta.value;
+    ta.value = cur + (cur && !cur.endsWith(' ') ? ' ' : '') + '@' + name + ' ';
+    ta.focus();
+  } else {
+    selectedMentions.splice(idx, 1);
+    el.classList.remove('selected');
   }
 }
 
@@ -1140,7 +1324,7 @@ async function sendReply() {
     const r = await fetch('/api/send/' + encodeURIComponent(modalChat.jid), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, mentions: selectedMentions.length ? selectedMentions : undefined }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Erro ao enviar');
@@ -1148,6 +1332,8 @@ async function sendReply() {
     hint.textContent = '✅ Mensagem enviada com sucesso!';
     btn.textContent = '✅ Enviado';
     document.getElementById('modal-reply-text').value = '';
+    selectedMentions = [];
+    document.querySelectorAll('.mention-chip.selected').forEach(el => el.classList.remove('selected'));
 
     // Move to "Respondidas"
     await markReplied(modalChat.jid);

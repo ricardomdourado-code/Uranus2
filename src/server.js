@@ -291,8 +291,16 @@ ${convo || '(sem mensagens recentes)'}`;
     res.json({ summary: (response.choices[0]?.message?.content || '').trim() });
   } catch (err) {
     logger.error({ err }, 'Erro ao resumir conversa');
-    res.status(500).json({ error: err.message });
+    res.json({ summary: `Erro ao gerar resumo: ${err.message}` });
   }
+});
+
+// GET /api/mentions — chats that mentioned the owner (non-ignored)
+app.get('/api/mentions', (req, res) => {
+  const mentions = state.analyzedChats.filter(
+    (c) => c.mentionedOwner && !state.ignoredJids.has(c.jid)
+  );
+  res.json({ mentions, count: mentions.length });
 });
 
 // POST /api/generate-reply — draft/refine a reply with AI using recent messages
@@ -336,10 +344,10 @@ Responda APENAS com o texto da mensagem, sem aspas e sem comentários.`;
 // POST /api/send/:jid — send a message directly via WhatsApp (for groups/LID)
 app.post('/api/send/:jid', async (req, res) => {
   const jid = decodeURIComponent(req.params.jid);
-  const { text } = req.body || {};
+  const { text, mentions } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
   try {
-    await sendTextMessage(jid, text.trim());
+    await sendTextMessage(jid, text.trim(), mentions || []);
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err, jid }, 'Erro ao enviar mensagem');
