@@ -212,20 +212,20 @@ const store = {
         const jid = u.key?.remoteJid;
         const id = u.key?.id;
         if (!jid || !id) continue;
-        // A revoke delivered through messages.update: message becomes null or
-        // carries a REVOKE protocolMessage.
+        // Only act on an EXPLICIT revoke protocolMessage. We must NOT treat a
+        // null/missing message (common in status/delivery/read updates) as a
+        // deletion — doing so wrongly wipes legitimate messages.
         const proto = u.update?.message?.protocolMessage;
-        const isRevoke = u.update?.messageStubType === 1 // REVOKE stub
-          || (proto && (proto.type === 0 || proto.type === 'REVOKE'))
-          || u.update?.message === null;
+        const isRevoke = proto && (proto.type === 0 || proto.type === 'REVOKE') && proto.key?.id;
         if (isRevoke) {
+          const targetId = proto.key.id;
           const arr = this.messages.get(jid);
           if (arr) {
-            const idx = arr.findIndex(m => m.key?.id === id);
+            const idx = arr.findIndex(m => m.key?.id === targetId);
             if (idx !== -1) { arr.splice(idx, 1); changed = true; }
           }
           storeEvents.emit('message-activity', {
-            jid, revoked: true, msgId: id,
+            jid, revoked: true, msgId: targetId,
             isGroup: jid.endsWith('@g.us'), timestamp: Date.now(),
           });
         }
