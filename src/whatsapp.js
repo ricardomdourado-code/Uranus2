@@ -347,14 +347,24 @@ export async function getAllChats(sock, options = {}) {
     let pushNameFromMsgs = null;
     if (!isGroup) {
       const msgs = store.messages.get(jid) || [];
+      // Scan newest-first; prefer non-fromMe but fall back to any message with pushName
+      let anyPushName = null;
       for (let i = msgs.length - 1; i >= 0; i--) {
-        if (!msgs[i].key?.fromMe && msgs[i].pushName) {
-          pushNameFromMsgs = msgs[i].pushName;
-          break;
+        if (msgs[i].pushName) {
+          if (!msgs[i].key?.fromMe) {
+            pushNameFromMsgs = msgs[i].pushName;
+            break;
+          } else if (!anyPushName) {
+            anyPushName = msgs[i].pushName;
+          }
         }
       }
+      if (!pushNameFromMsgs) pushNameFromMsgs = anyPushName;
     }
-    let name = chat.name || chat.subject || store.resolveName(jid) || pushNameFromMsgs || jidToReadable(jid);
+    const rawFallback = jidToReadable(jid);
+    const isLid = jid.endsWith('@lid');
+    const friendlyFallback = isLid ? `Contato (${rawFallback.slice(-6)})` : rawFallback;
+    let name = chat.name || chat.subject || store.resolveName(jid) || pushNameFromMsgs || friendlyFallback;
     let participants = [];
 
     if (isGroup) {
