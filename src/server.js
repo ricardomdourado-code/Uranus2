@@ -7,7 +7,7 @@ import { state, broadcast } from './state.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
-import { saveGroups, saveDelegates } from './state.js';
+import { saveGroups, saveDelegates, saveIgnored } from './state.js';
 import OpenAI from 'openai';
 
 const app = express();
@@ -19,12 +19,13 @@ app.use(express.static(join(process.cwd(), 'public')));
 
 // GET /api/status
 app.get('/api/status', (req, res) => {
-  const totalUnread = state.analyzedChats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+  const active = state.analyzedChats.filter((c) => !state.ignoredJids.has(c.jid));
+  const totalUnread = active.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
   res.json({
     connected: state.connected,
     lastRun: state.lastRun,
     nextRun: state.nextRun,
-    totalChats: state.analyzedChats.length,
+    totalChats: active.length,
     totalUnread,
   });
 });
@@ -34,8 +35,25 @@ app.get('/api/report', (req, res) => {
   res.json({
     chats: state.analyzedChats,
     resolvedJids: [...state.resolvedJids],
+    ignoredJids: [...state.ignoredJids],
     lastRun: state.lastRun,
   });
+});
+
+// POST /api/ignore/:jid — move conversation to the "Geral" column
+app.post('/api/ignore/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  state.ignoredJids.add(jid);
+  await saveIgnored();
+  res.json({ ok: true, jid, ignored: true });
+});
+
+// DELETE /api/ignore/:jid — restore conversation from "Geral"
+app.delete('/api/ignore/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  state.ignoredJids.delete(jid);
+  await saveIgnored();
+  res.json({ ok: true, jid, ignored: false });
 });
 
 // POST /api/resolve/:jid
@@ -54,7 +72,8 @@ app.delete('/api/resolve/:jid', (req, res) => {
 
 // GET /api/analytics
 app.get('/api/analytics', (req, res) => {
-  const chats = state.analyzedChats;
+  // Ignored ("Geral") conversations must not skew the indicators.
+  const chats = state.analyzedChats.filter((c) => !state.ignoredJids.has(c.jid));
 
   // Top senders by unreadCount
   const topSenders = [...chats]
@@ -265,7 +284,7 @@ export function updateReportData(analyzedChats) {
   );
 
   const newCriticals = analyzedChats.filter(
-    (c) => c.priority === 'CRITICA' && !prevCriticalJids.has(c.jid)
+    (c) => c.priority === 'CRITICA' && !prevCriticalJids.has(c.jid) && !state.ignoredJids.has(c.jid)
   );
 
   state._prevAnalyzedChats = analyzedChats;
@@ -274,6 +293,7 @@ export function updateReportData(analyzedChats) {
   broadcast('cycle-complete', {
     chats: analyzedChats,
     resolvedJids: [...state.resolvedJids],
+    ignoredJids: [...state.ignoredJids],
     lastRun: state.lastRun,
   });
 

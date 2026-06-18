@@ -4,10 +4,12 @@ import { resolve } from 'path';
 const DATA_DIR = resolve('./data');
 const GROUPS_FILE = resolve('./data/groups.json');
 const DELEGATES_FILE = resolve('./data/delegates.json');
+const IGNORED_FILE = resolve('./data/ignored.json');
 
 export const state = {
   analyzedChats: [],
   resolvedJids: new Set(),
+  ignoredJids: new Set(),  // conversations moved to the "Geral" column
   lastRun: null,
   nextRun: null,
   connected: false,
@@ -26,6 +28,15 @@ export async function loadPersistedData() {
     const d = await readFile(DELEGATES_FILE, 'utf-8');
     state.delegates = JSON.parse(d);
   } catch { state.delegates = {}; }
+  try {
+    const i = await readFile(IGNORED_FILE, 'utf-8');
+    state.ignoredJids = new Set(JSON.parse(i));
+  } catch { state.ignoredJids = new Set(); }
+}
+
+export async function saveIgnored() {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(IGNORED_FILE, JSON.stringify([...state.ignoredJids], null, 2));
 }
 
 export async function saveGroups() {

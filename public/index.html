@@ -167,11 +167,14 @@
   /* PRIORITY COLUMNS */
   .priority-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 16px;
     align-items: start;
   }
 
+  @media (max-width: 1400px) {
+    .priority-grid { grid-template-columns: repeat(3, 1fr); }
+  }
   @media (max-width: 1100px) {
     .priority-grid { grid-template-columns: repeat(2, 1fr); }
   }
@@ -205,6 +208,7 @@
   .p-ALTA    { background: rgba(249,115,22,0.18); color: var(--alta);   border-top: 3px solid var(--alta); }
   .p-MEDIA   { background: rgba(234,179,8,0.18);  color: var(--media);  border-top: 3px solid var(--media); }
   .p-BAIXA   { background: rgba(34,197,94,0.18);  color: var(--baixa);  border-top: 3px solid var(--baixa); }
+  .p-GERAL   { background: rgba(100,116,139,0.18); color: #94a3b8;       border-top: 3px solid #64748b; }
 
   /* CARD */
   .card {
@@ -337,6 +341,22 @@
   }
   .resolve-btn:hover { border-color: var(--baixa); color: var(--baixa); }
   .resolve-btn.resolved { background: rgba(34,197,94,0.15); border-color: var(--baixa); color: var(--baixa); }
+
+  .card-btns { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .ignore-btn {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .ignore-btn:hover { border-color: #64748b; color: #cbd5e1; }
+  .ignore-btn.ignored { border-color: var(--accent); color: var(--accent); }
 
   /* ANALYTICS */
   .analytics-grid {
@@ -557,6 +577,7 @@
 let reportData = { chats: [], resolvedJids: [], lastRun: null };
 let analyticsData = null;
 let resolvedSet = new Set();
+let ignoredSet = new Set();
 let charts = {};
 
 // ============================================================
@@ -674,6 +695,7 @@ async function fetchStatus() {
 function applyReportData(data) {
   reportData = data;
   resolvedSet = new Set(data.resolvedJids || []);
+  ignoredSet = new Set(data.ignoredJids || []);
   const lu = document.getElementById('last-update');
   lu.textContent = data.lastRun ? 'Atualizado: ' + fmtTime(data.lastRun) : '';
   renderPriorities();
@@ -699,7 +721,8 @@ async function manualRefresh() {
 // PRIORITIES TAB
 // ============================================================
 const PRIORITIES = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA'];
-const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA' };
+const COLUMNS = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA', 'GERAL'];
+const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'GERAL' };
 
 function renderPriorities() {
   const search = document.getElementById('search-input').value.toLowerCase();
@@ -715,13 +738,15 @@ function renderPriorities() {
   });
 
   const byPriority = {};
-  PRIORITIES.forEach(p => byPriority[p] = []);
+  COLUMNS.forEach(p => byPriority[p] = []);
   chats.forEach(c => {
+    // Ignored conversations always go to the GERAL column, regardless of priority.
+    if (ignoredSet.has(c.jid)) { byPriority.GERAL.push(c); return; }
     const p = PRIORITIES.includes(c.priority) ? c.priority : 'BAIXA';
     byPriority[p].push(c);
   });
 
-  grid.innerHTML = PRIORITIES.map(p => {
+  grid.innerHTML = COLUMNS.map(p => {
     const list = byPriority[p];
     const totalUnread = list.reduce((s, c) => s + (c.unreadCount || 0), 0);
     return `
@@ -740,6 +765,7 @@ function renderPriorities() {
 
 function cardHtml(c) {
   const resolved = resolvedSet.has(c.jid);
+  const ignored = ignoredSet.has(c.jid);
   const jidEnc = encodeURIComponent(c.jid);
   const typeBadge = c.type === 'Grupo' ? 'badge-grupo' : 'badge-individual';
   const typeLabel = c.type === 'Grupo' ? 'Grupo' : 'Individual';
@@ -767,13 +793,31 @@ function cardHtml(c) {
       <div class="card-time">${fmtTime(c.lastMessageTime)}</div>
       <div class="card-summary collapsed" id="${summaryId}">${escHtml(c.summary)}</div>
       <button class="expand-btn" onclick="toggleSummary('${summaryId}', this)">+ Ver mais</button>
-      ${suggestion}
-      ${actions}
-      <button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
-        ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
-      </button>
+      ${ignored ? '' : suggestion}
+      ${ignored ? '' : actions}
+      <div class="card-btns">
+        ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
+          ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
+        </button>`}
+        <button class="ignore-btn ${ignored ? 'ignored' : ''}" onclick="toggleIgnore(${JSON.stringify(c.jid)})">
+          ${ignored ? '↩ Restaurar' : '✕ Mover p/ Geral'}
+        </button>
+      </div>
     </div>
   `;
+}
+
+async function toggleIgnore(jid) {
+  const isIgnored = ignoredSet.has(jid);
+  const method = isIgnored ? 'DELETE' : 'POST';
+  try {
+    await fetch('/api/ignore/' + encodeURIComponent(jid), { method });
+    if (isIgnored) ignoredSet.delete(jid); else ignoredSet.add(jid);
+    renderPriorities();
+    updateSummaryCards();
+  } catch(e) {
+    showToast('Erro ao atualizar conversa');
+  }
 }
 
 function toggleSummary(id, btn) {
@@ -842,7 +886,8 @@ async function loadAnalytics() {
 }
 
 function updateSummaryCards() {
-  const chats = reportData.chats || [];
+  // Ignored ("Geral") conversations are excluded from the indicators.
+  const chats = (reportData.chats || []).filter(c => !ignoredSet.has(c.jid));
   document.getElementById('sc-total').textContent = chats.length;
   document.getElementById('sc-unread').textContent = chats.reduce((s,c) => s + (c.unreadCount||0), 0);
   document.getElementById('sc-resolved').textContent = resolvedSet.size;

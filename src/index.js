@@ -38,16 +38,43 @@ async function runAnalysisCycle() {
 
     lastAnalysisTime = Date.now();
 
+    // Split out conversations the user moved to "Geral": they are NOT sent to
+    // GPT (saves tokens) and won't affect indicators, but still appear listed.
+    const ignored = state.ignoredJids;
+    const toAnalyze = chats.filter((c) => !ignored.has(c.jid));
+    const generalChats = chats
+      .filter((c) => ignored.has(c.jid))
+      .map((c) => ({
+        jid: c.jid,
+        name: c.name,
+        priority: 'GERAL',
+        priorityReason: 'Conversa marcada como não relevante (Geral).',
+        summary: c.lastMessage || 'Sem resumo (conversa em Geral).',
+        suggestedResponse: null,
+        actionItems: [],
+        requiresResponse: false,
+        urgencyScore: 0,
+        unreadCount: c.unreadCount || 0,
+        lastMessageTime: c.lastMessageTime || null,
+        type: c.type,
+        ignored: true,
+      }));
+
+    if (ignored.size > 0) {
+      logger.info(`${generalChats.length} conversa(s) em "Geral" (puladas no GPT) | ${toAnalyze.length} para análise.`);
+    }
+
     logger.info(`Carregando mensagens (até ${config.analysis.maxMessagesPerChat} por conversa)...`);
     const chatsWithMessages = await Promise.all(
-      chats.map(async (chat) => {
+      toAnalyze.map(async (chat) => {
         const messages = await getChatMessages(sock, chat.jid, config.analysis.maxMessagesPerChat);
         return { ...chat, messages };
       })
     );
 
     logger.info('Enviando para análise GPT-4o...');
-    const analyzedChats = await classifyAndSummarizeChats(chatsWithMessages);
+    const analyzed = await classifyAndSummarizeChats(chatsWithMessages);
+    const analyzedChats = [...analyzed, ...generalChats];
 
     const executiveSummary = await generateExecutiveSummary(analyzedChats);
     const reportText = generateReport(analyzedChats, executiveSummary);
