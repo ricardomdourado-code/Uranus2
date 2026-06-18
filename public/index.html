@@ -164,18 +164,26 @@
     user-select: none;
   }
 
-  /* PRIORITY COLUMNS — full-viewport Kanban */
+  /* PRIORITY COLUMNS — wide Kanban with horizontal scroll */
   .priority-grid {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 10px;
+    grid-auto-flow: column;
+    grid-auto-columns: 340px;       /* fixed, comfortable column width */
+    gap: 14px;
     align-items: start;
-    /* each column scrolls independently; grid itself does not scroll horizontally */
+    overflow-x: auto;               /* horizontal scrollbar when columns overflow */
+    padding-bottom: 12px;
   }
 
+  /* Always-visible, styled horizontal scrollbar */
+  .priority-grid::-webkit-scrollbar { height: 12px; }
+  .priority-grid::-webkit-scrollbar-track { background: var(--surface); border-radius: 6px; }
+  .priority-grid::-webkit-scrollbar-thumb { background: #475569; border-radius: 6px; }
+  .priority-grid::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
   .priority-col {
-    min-width: 0;                /* prevent blowout */
-    max-height: calc(100vh - 130px);
+    min-width: 0;
+    max-height: calc(100vh - 140px);
     display: flex;
     flex-direction: column;
   }
@@ -195,15 +203,9 @@
     padding-bottom: 8px;
   }
 
-  @media (max-width: 1400px) {
-    .priority-grid { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 640px) {
+    .priority-grid { grid-auto-columns: 88vw; }
     .priority-col { max-height: none; }
-  }
-  @media (max-width: 900px) {
-    .priority-grid { grid-template-columns: repeat(2, 1fr); }
-  }
-  @media (max-width: 540px) {
-    .priority-grid { grid-template-columns: 1fr; }
   }
 
   .priority-header {
@@ -903,7 +905,7 @@ function cardHtml(c) {
   const suggestion = c.suggestedResponse
     ? `<div class="suggestion-block">
         ${escHtml(c.suggestedResponse)}
-        <button class="copy-btn" onclick="copyText(${JSON.stringify(c.suggestedResponse)}, this)">Copiar</button>
+        <button class="copy-btn" onclick="copyText(${escHtml(JSON.stringify(c.suggestedResponse))}, this)">Copiar</button>
        </div>`
     : '';
 
@@ -915,23 +917,23 @@ function cardHtml(c) {
 
   return `
     <div class="card ${resolved ? 'resolved' : ''}" id="card-${jidEnc}">
-      <div class="card-top card-clickable" onclick="openChatModal(${JSON.stringify(c.jid)})" title="Ver conversa e responder">
+      <div class="card-top card-clickable" onclick="openChatModal('${c.jid}')" title="Ver conversa e responder">
         <div class="card-name">${escHtml(c.name)}</div>
         <span class="badge ${typeBadge}">${typeLabel}</span>
         ${c.unreadCount ? `<span class="badge badge-unread">${c.unreadCount}</span>` : ''}
         ${c.mentionedOwner ? '<span class="badge badge-mention" title="Mencionou você">@você</span>' : ''}
       </div>
       <div class="card-time">${fmtTime(c.lastMessageTime)}</div>
-      <div class="card-summary collapsed card-clickable" id="${summaryId}" onclick="openChatModal(${JSON.stringify(c.jid)})">${escHtml(c.summary)}</div>
+      <div class="card-summary collapsed card-clickable" id="${summaryId}" onclick="openChatModal('${c.jid}')">${escHtml(c.summary)}</div>
       <button class="expand-btn" onclick="toggleSummary('${summaryId}', this)">+ Ver mais</button>
       ${ignored ? '' : suggestion}
       ${ignored ? '' : actions}
       <div class="card-btns">
-        <button class="open-btn" onclick="openChatModal(${JSON.stringify(c.jid)})">💬 Ver conversa & responder</button>
-        ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
+        <button class="open-btn" onclick="openChatModal('${c.jid}')">💬 Ver conversa & responder</button>
+        ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve('${c.jid}', this)">
           ${resolved ? '↩ Reabrir' : '○ Marcar como respondida'}
         </button>`}
-        <button class="ignore-btn ${ignored ? 'ignored' : ''}" onclick="toggleIgnore(${JSON.stringify(c.jid)})">
+        <button class="ignore-btn ${ignored ? 'ignored' : ''}" onclick="toggleIgnore('${c.jid}')">
           ${ignored ? '↩ Restaurar' : '✕ Mover p/ Diversos'}
         </button>
       </div>

@@ -145,7 +145,7 @@ async function main() {
   logger.info('  Uranus2 WhatsApp Automação — Iniciando');
   logger.info(`  Proprietário: ${config.whatsapp.ownerName}`);
   logger.info(`  Modelo IA: ${config.openai.model}`);
-  logger.info(`  Ciclo: a cada ${config.scheduler.intervalHours}h`);
+  logger.info(`  Ciclo: a cada ${config.scheduler.intervalMinutes > 0 ? config.scheduler.intervalMinutes + ' min' : config.scheduler.intervalHours + 'h'}`);
   logger.info('═'.repeat(60));
 
   setupGracefulShutdown();

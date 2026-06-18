@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { format, addHours } from 'date-fns';
+import { format, addHours, addMinutes } from 'date-fns';
 import { toZonedTime } from 'date-fns-tz';
 import { config } from './config.js';
 import { logger } from './logger.js';
@@ -11,18 +11,20 @@ import { logger } from './logger.js';
  * @param {() => Promise<void>} runFn - The async function to schedule
  */
 export function startScheduler(runFn) {
+  const intervalMinutes = config.scheduler.intervalMinutes;
   const intervalHours = config.scheduler.intervalHours;
+  const useMinutes = intervalMinutes > 0;
 
-  // Build cron expression for every N hours
-  // node-cron supports step values: "0 */3 * * *" = every 3 hours at minute 0
-  const cronExpression = `0 */${intervalHours} * * *`;
+  // node-cron step values: "*/10 * * * *" = every 10 minutes; "0 */3 * * *" = every 3h
+  const cronExpression = useMinutes ? `*/${intervalMinutes} * * * *` : `0 */${intervalHours} * * *`;
+  const label = useMinutes ? `${intervalMinutes} minuto(s)` : `${intervalHours} hora(s)`;
 
-  logger.info(`Agendador configurado: a cada ${intervalHours} hora(s) | Cron: "${cronExpression}"`);
+  logger.info(`Agendador configurado: a cada ${label} | Cron: "${cronExpression}"`);
 
   // Run immediately on startup
   logger.info('Iniciando primeira execução imediata...');
   runWithErrorHandling(runFn).then(() => {
-    logNextRun(intervalHours);
+    logNextRun(useMinutes, intervalMinutes, intervalHours);
   });
 
   // Schedule subsequent runs
@@ -31,7 +33,7 @@ export function startScheduler(runFn) {
     logger.info(`[AGENDADOR] Execução programada iniciada às ${now}`);
 
     await runWithErrorHandling(runFn);
-    logNextRun(intervalHours);
+    logNextRun(useMinutes, intervalMinutes, intervalHours);
   }, {
     timezone: config.timezone,
   });
@@ -53,8 +55,10 @@ async function runWithErrorHandling(runFn) {
 /**
  * Log when the next run will be.
  */
-function logNextRun(intervalHours) {
-  const nextRun = addHours(new Date(), intervalHours);
+function logNextRun(useMinutes, intervalMinutes, intervalHours) {
+  const nextRun = useMinutes
+    ? addMinutes(new Date(), intervalMinutes)
+    : addHours(new Date(), intervalHours);
   const nextRunFormatted = format(
     toZonedTime(nextRun, config.timezone),
     "dd/MM/yyyy 'às' HH:mm:ss"

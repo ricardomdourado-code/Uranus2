@@ -13,6 +13,8 @@ export const config = {
   scheduler: {
     deepReadHour: parseInt(process.env.DEEP_READ_HOUR || '8', 10),
     intervalHours: parseInt(process.env.READ_INTERVAL_HOURS || '3', 10),
+    // When set (>0), takes precedence over intervalHours. Default: 10 minutes.
+    intervalMinutes: parseInt(process.env.READ_INTERVAL_MINUTES || '10', 10),
   },
   analysis: {
     maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '10', 10),
