@@ -30,10 +30,15 @@ const store = {
         if (!this.messages.has(jid)) this.messages.set(jid, []);
         const arr = this.messages.get(jid);
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
+        // Auto-create chat entry from messages if not present
+        if (!this.chats.has(jid)) {
+          this.chats.set(jid, { id: jid, unreadCount: 0 });
+        }
       }
-      // Emit ready when we have chats loaded
-      if (this.chats.size > 0) {
-        storeEvents.emit('history-ready', { chats: this.chats.size, isLatest });
+      const totalChats = this.chats.size;
+      const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
+      if (totalChats > 0 || totalMsgs > 0) {
+        storeEvents.emit('history-ready', { chats: totalChats, messages: totalMsgs, isLatest });
       }
     });
     ev.on('chats.set', ({ chats }) => {
