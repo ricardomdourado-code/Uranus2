@@ -18,31 +18,44 @@ const store = {
   chats: new Map(),
   messages: new Map(),
   bind(ev) {
+    // Main history event (fires on first sync with all chats+messages)
+    ev.on('messaging-history.set', ({ chats: historicChats, messages: historicMessages, isLatest }) => {
+      logger.info(`messaging-history.set: ${historicChats?.length || 0} chats, ${historicMessages?.length || 0} msgs, isLatest=${isLatest}`);
+      for (const chat of (historicChats || [])) this.chats.set(chat.id, chat);
+      for (const msg of (historicMessages || [])) {
+        const jid = msg.key?.remoteJid;
+        if (!jid) continue;
+        if (!this.messages.has(jid)) this.messages.set(jid, []);
+        const arr = this.messages.get(jid);
+        if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
+      }
+    });
     ev.on('chats.set', ({ chats }) => {
-      for (const chat of chats) this.chats.set(chat.id, chat);
+      for (const chat of (chats || [])) this.chats.set(chat.id, chat);
     });
     ev.on('chats.upsert', (chats) => {
-      for (const chat of chats) this.chats.set(chat.id, chat);
+      for (const chat of (chats || [])) this.chats.set(chat.id, chat);
     });
     ev.on('chats.update', (updates) => {
-      for (const update of updates) {
+      for (const update of (updates || [])) {
         const existing = this.chats.get(update.id) || {};
         this.chats.set(update.id, { ...existing, ...update });
       }
     });
     ev.on('messages.set', ({ messages }) => {
-      for (const msg of messages) {
-        const jid = msg.key.remoteJid;
+      for (const msg of (messages || [])) {
+        const jid = msg.key?.remoteJid;
+        if (!jid) continue;
         if (!this.messages.has(jid)) this.messages.set(jid, []);
         this.messages.get(jid).push(msg);
       }
     });
     ev.on('messages.upsert', ({ messages }) => {
-      for (const msg of messages) {
-        const jid = msg.key.remoteJid;
+      for (const msg of (messages || [])) {
+        const jid = msg.key?.remoteJid;
+        if (!jid) continue;
         if (!this.messages.has(jid)) this.messages.set(jid, []);
         const arr = this.messages.get(jid);
-        // avoid duplicates
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
         if (arr.length > 500) arr.shift();
       }
