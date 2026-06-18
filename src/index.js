@@ -4,6 +4,8 @@ import { getAllChats, getChatMessages } from './whatsapp.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
 import { startScheduler } from './scheduler.js';
+import { initMorningBrief } from './morning-brief.js';
+import { loadPersistedData } from './state.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { initServer, updateReportData } from './server.js';
@@ -78,6 +80,8 @@ async function main() {
 
   setupGracefulShutdown();
   initServer(config.server?.port || 3000);
+  await loadPersistedData();
+  initMorningBrief(getSocket);
 
   // Keep trying to connect until successful
   const waitForConnection = () => new Promise((resolve) => {

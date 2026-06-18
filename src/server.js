@@ -6,6 +6,9 @@ import { join, basename } from 'path';
 import { state, broadcast } from './state.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { randomUUID } from 'crypto';
+import { saveGroups, saveDelegates } from './state.js';
+import OpenAI from 'openai';
 
 const app = express();
 app.use(cors());
@@ -136,6 +139,110 @@ app.get('/api/events', (req, res) => {
     clearInterval(heartbeat);
     state.sseClients.delete(res);
   });
+});
+
+// Groups API
+app.get('/api/groups', (req, res) => {
+  res.json({ groups: state.groups });
+});
+
+app.post('/api/groups', async (req, res) => {
+  const { name, emoji, color } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const group = { id: randomUUID(), name, emoji: emoji || '📁', color: color || '#3b82f6', jids: [] };
+  state.groups.push(group);
+  await saveGroups();
+  res.json({ ok: true, group });
+});
+
+app.delete('/api/groups/:id', async (req, res) => {
+  const idx = state.groups.findIndex(g => g.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'not found' });
+  state.groups.splice(idx, 1);
+  await saveGroups();
+  res.json({ ok: true });
+});
+
+app.post('/api/groups/:id/assign', async (req, res) => {
+  const { jid } = req.body;
+  const group = state.groups.find(g => g.id === req.params.id);
+  if (!group) return res.status(404).json({ error: 'not found' });
+  // Remove jid from all groups first
+  state.groups.forEach(g => { g.jids = g.jids.filter(j => j !== jid); });
+  group.jids.push(jid);
+  await saveGroups();
+  res.json({ ok: true });
+});
+
+app.delete('/api/groups/:id/assign/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  const group = state.groups.find(g => g.id === req.params.id);
+  if (!group) return res.status(404).json({ error: 'not found' });
+  group.jids = group.jids.filter(j => j !== jid);
+  await saveGroups();
+  res.json({ ok: true });
+});
+
+// Delegates API
+app.get('/api/delegates', (req, res) => {
+  res.json({ delegates: state.delegates });
+});
+
+app.post('/api/delegate', async (req, res) => {
+  const { jid, assignee } = req.body;
+  if (!jid || !assignee) return res.status(400).json({ error: 'jid and assignee required' });
+  state.delegates[jid] = assignee;
+  await saveDelegates();
+  res.json({ ok: true, jid, assignee });
+});
+
+// Generate email
+const _openaiForEmail = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+
+app.post('/api/generate-email', async (req, res) => {
+  const { jid } = req.body;
+  if (!jid) return res.status(400).json({ error: 'jid required' });
+  const chat = state.analyzedChats.find(c => c.jid === jid);
+  if (!chat) return res.status(404).json({ error: 'chat not found' });
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.json({
+      subject: `Re: ${chat.name}`,
+      body: `Prezado(a),\n\nEm referência à nossa conversa recente, gostaríamos de confirmar os pontos discutidos.\n\n${chat.summary || ''}\n\nAtenciosamente,\nRicardo Dourado | Uranus2`
+    });
+  }
+
+  try {
+    const prompt = `Você é assistente executivo de Ricardo Dourado da empresa Uranus2.
+Com base nesta conversa do WhatsApp, escreva um e-mail profissional em português.
+
+Conversa: ${chat.name}
+Resumo: ${chat.summary || 'Sem resumo'}
+Itens de ação: ${(chat.actionItems || []).join('; ') || 'Nenhum'}
+Última mensagem: ${chat.lastMessage || ''}
+
+Retorne JSON: { "subject": "assunto do email", "body": "corpo completo do email" }
+O email deve ser formal, profissional, assinado como "Ricardo Dourado | Uranus2".
+Responda APENAS o JSON, sem markdown.`;
+
+    const response = await _openaiForEmail.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      max_tokens: 800,
+      response_format: { type: 'json_object' },
+    });
+    const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
+    res.json({ subject: parsed.subject || `Re: ${chat.name}`, body: parsed.body || '' });
+  } catch (err) {
+    logger.error({ err }, 'Erro ao gerar email');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TV page
+app.get('/tv', (req, res) => {
+  res.sendFile(join(process.cwd(), 'public', 'tv.html'));
 });
 
 // --- Exported functions ---

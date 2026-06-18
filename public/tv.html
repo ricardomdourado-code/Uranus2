@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uranus2 — TV Mode</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: #334155;
+    --text: #e2e8f0; --text-muted: #94a3b8; --critica: #ef4444;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; overflow: hidden; }
+
+  .tv-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 32px; background: var(--surface); border-bottom: 2px solid var(--critica);
+  }
+  .tv-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; color: var(--critica); }
+  .tv-clock { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tv-stats { font-size: 16px; color: var(--text-muted); }
+  .tv-unread { font-size: 20px; font-weight: 700; color: var(--critica); }
+
+  .tv-body { padding: 24px 32px; height: calc(100vh - 74px); overflow: hidden; position: relative; }
+
+  .tv-scroll-container {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    animation: scrollUp 60s linear infinite;
+  }
+
+  @keyframes scrollUp {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); }
+  }
+
+  .tv-card {
+    background: var(--surface); border: 2px solid var(--critica);
+    border-radius: 12px; padding: 20px 24px; width: calc(50% - 10px);
+    min-width: 320px;
+  }
+
+  .tv-card-name { font-size: 20px; font-weight: 800; color: var(--critica); margin-bottom: 8px; }
+  .tv-card-summary { font-size: 15px; line-height: 1.5; color: var(--text); }
+  .tv-card-unread {
+    display: inline-block; background: var(--critica); color: #fff;
+    border-radius: 20px; padding: 2px 10px; font-size: 13px; font-weight: 700; margin-top: 10px;
+  }
+  .tv-card-time { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+  .tv-empty { text-align: center; padding: 80px; font-size: 20px; color: var(--text-muted); }
+
+  .refresh-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 3px;
+    background: rgba(239,68,68,0.2);
+  }
+  .refresh-bar-inner {
+    height: 100%; background: var(--critica);
+    animation: countdown 60s linear forwards;
+  }
+  @keyframes countdown {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+</style>
+</head>
+<body>
+<div class="tv-header">
+  <div class="tv-title">🚨 URANUS2 — PRIORIDADES CRÍTICAS</div>
+  <div style="text-align:right">
+    <div class="tv-clock" id="tv-clock">00:00:00</div>
+    <div class="tv-stats">Não lidas: <span class="tv-unread" id="tv-unread">—</span></div>
+  </div>
+</div>
+<div class="tv-body">
+  <div id="tv-cards"></div>
+</div>
+<div class="refresh-bar"><div class="refresh-bar-inner" id="refresh-bar-inner"></div></div>
+
+<script>
+let criticalChats = [];
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return '';
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateClock() {
+  const now = new Date();
+  document.getElementById('tv-clock').textContent = now.toLocaleTimeString('pt-BR');
+}
+
+function renderCards() {
+  const container = document.getElementById('tv-cards');
+  const totalUnread = criticalChats.reduce((s,c) => s + (c.unreadCount||0), 0);
+  document.getElementById('tv-unread').textContent = totalUnread;
+
+  if (!criticalChats.length) {
+    container.innerHTML = '<div class="tv-empty">✅ Nenhuma prioridade crítica no momento</div>';
+    return;
+  }
+
+  // Double the cards for seamless scroll loop
+  const doubled = [...criticalChats, ...criticalChats];
+  container.innerHTML = `<div class="tv-scroll-container">${
+    doubled.map(c => `
+      <div class="tv-card">
+        <div class="tv-card-name">${escHtml(c.name)}</div>
+        <div class="tv-card-summary">${escHtml(c.summary || c.priorityReason || '')}</div>
+        ${c.unreadCount ? `<span class="tv-card-unread">${c.unreadCount} não lidas</span>` : ''}
+        <div class="tv-card-time">${fmtTime(c.lastMessageTime)}</div>
+      </div>
+    `).join('')
+  }</div>`;
+}
+
+async function loadData() {
+  try {
+    const r = await fetch('/api/report');
+    const d = await r.json();
+    criticalChats = (d.chats || []).filter(c => c.priority === 'CRITICA');
+    renderCards();
+    // Reset refresh bar
+    const bar = document.getElementById('refresh-bar-inner');
+    bar.style.animation = 'none';
+    bar.offsetHeight; // reflow
+    bar.style.animation = 'countdown 60s linear forwards';
+  } catch(e) {}
+}
+
+// SSE for live updates
+const es = new EventSource('/api/events');
+es.addEventListener('cycle-complete', (e) => {
+  const data = JSON.parse(e.data);
+  criticalChats = (data.chats || []).filter(c => c.priority === 'CRITICA');
+  renderCards();
+});
+
+setInterval(updateClock, 1000);
+setInterval(loadData, 60000);
+loadData();
+updateClock();
+</script>
+</body>
+</html>
