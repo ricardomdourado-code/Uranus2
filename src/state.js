@@ -5,10 +5,12 @@ const DATA_DIR = resolve('./data');
 const GROUPS_FILE = resolve('./data/groups.json');
 const DELEGATES_FILE = resolve('./data/delegates.json');
 const IGNORED_FILE = resolve('./data/ignored.json');
+const RESOLVED_FILE = resolve('./data/resolved.json');
 
 export const state = {
   analyzedChats: [],
-  resolvedJids: new Set(),
+  resolvedJids: new Set(),     // conversations moved to "Respondidas"
+  repliedAt: {},               // { jid: epochMs } — baseline to detect new movement
   ignoredJids: new Set(),  // conversations moved to the "Geral" column
   lastRun: null,
   nextRun: null,
@@ -32,11 +34,25 @@ export async function loadPersistedData() {
     const i = await readFile(IGNORED_FILE, 'utf-8');
     state.ignoredJids = new Set(JSON.parse(i));
   } catch { state.ignoredJids = new Set(); }
+  try {
+    const r = await readFile(RESOLVED_FILE, 'utf-8');
+    const parsed = JSON.parse(r);
+    state.resolvedJids = new Set(parsed.resolved || []);
+    state.repliedAt = parsed.repliedAt || {};
+  } catch { state.resolvedJids = new Set(); state.repliedAt = {}; }
 }
 
 export async function saveIgnored() {
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(IGNORED_FILE, JSON.stringify([...state.ignoredJids], null, 2));
+}
+
+export async function saveResolved() {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(RESOLVED_FILE, JSON.stringify({
+    resolved: [...state.resolvedJids],
+    repliedAt: state.repliedAt,
+  }, null, 2));
 }
 
 export async function saveGroups() {

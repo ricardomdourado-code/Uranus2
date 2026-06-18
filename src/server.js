@@ -7,7 +7,7 @@ import { state, broadcast } from './state.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
-import { saveGroups, saveDelegates, saveIgnored } from './state.js';
+import { saveGroups, saveDelegates, saveIgnored, saveResolved } from './state.js';
 import { getRecentMessages, getChatPhone, sendTextMessage } from './whatsapp.js';
 import OpenAI from 'openai';
 
@@ -57,17 +57,22 @@ app.delete('/api/ignore/:jid', async (req, res) => {
   res.json({ ok: true, jid, ignored: false });
 });
 
-// POST /api/resolve/:jid
-app.post('/api/resolve/:jid', (req, res) => {
+// POST /api/resolve/:jid — moves chat to "Respondidas" and records the moment,
+// so any later incoming message brings it back to the panel by priority.
+app.post('/api/resolve/:jid', async (req, res) => {
   const jid = decodeURIComponent(req.params.jid);
   state.resolvedJids.add(jid);
+  state.repliedAt[jid] = Date.now();
+  await saveResolved().catch(() => {});
   res.json({ ok: true, jid, resolved: true });
 });
 
 // DELETE /api/resolve/:jid
-app.delete('/api/resolve/:jid', (req, res) => {
+app.delete('/api/resolve/:jid', async (req, res) => {
   const jid = decodeURIComponent(req.params.jid);
   state.resolvedJids.delete(jid);
+  delete state.repliedAt[jid];
+  await saveResolved().catch(() => {});
   res.json({ ok: true, jid, resolved: false });
 });
 

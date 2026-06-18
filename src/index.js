@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { connectToWhatsApp, getSocket, storeEvents, getStoreSize, loadStore, flushStore } from './whatsapp.js';
-import { getAllChats, getChatMessages, chatMentionsOwner } from './whatsapp.js';
+import { getAllChats, getChatMessages, chatMentionsOwner, getLastIncomingTime } from './whatsapp.js';
+import { saveResolved } from './state.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
 import { startScheduler } from './scheduler.js';
@@ -37,6 +38,23 @@ async function runAnalysisCycle() {
     }
 
     lastAnalysisTime = Date.now();
+
+    // Auto-return: a "Respondida" conversation that received a NEW incoming
+    // message after the reply comes back to the panel by its priority.
+    let returned = 0;
+    for (const jid of [...state.resolvedJids]) {
+      const repliedAt = state.repliedAt[jid] || 0;
+      const lastIn = getLastIncomingTime(jid);
+      if (lastIn > repliedAt) {
+        state.resolvedJids.delete(jid);
+        delete state.repliedAt[jid];
+        returned += 1;
+      }
+    }
+    if (returned > 0) {
+      logger.info(`${returned} conversa(s) em "Respondidas" tiveram nova movimentação — retornando ao painel.`);
+      await saveResolved().catch(() => {});
+    }
 
     // Split out conversations the user moved to "Diversos": they are NOT sent to
     // GPT (saves tokens) and won't affect indicators, but still appear listed.

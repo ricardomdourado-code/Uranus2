@@ -441,6 +441,20 @@ export function getRecentMessages(jid, limit = 20) {
 }
 
 /**
+ * Epoch (ms) of the most recent INCOMING (not fromMe) message in a chat.
+ * Returns 0 if none. Used to detect new movement after a reply.
+ */
+export function getLastIncomingTime(jid) {
+  const msgs = store.messages.get(jid) || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (!msgs[i].key?.fromMe && msgs[i].messageTimestamp) {
+      return Number(msgs[i].messageTimestamp) * 1000;
+    }
+  }
+  return 0;
+}
+
+/**
  * Check whether any of the most recent messages in a chat mention the owner
  * by name (e.g. "@ricardo", "Ricardo"). Used to pull conversations back out of
  * the "Diversos" column when the user is directly addressed.

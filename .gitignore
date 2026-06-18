@@ -3,6 +3,8 @@ data/auth/
 data/store.json
 data/groups.json
 data/delegates.json
+data/ignored.json
+data/resolved.json
 .env
 reports/
 *.log

@@ -167,12 +167,12 @@
   /* PRIORITY COLUMNS */
   .priority-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 16px;
     align-items: start;
   }
 
-  @media (max-width: 1400px) {
+  @media (max-width: 1600px) {
     .priority-grid { grid-template-columns: repeat(3, 1fr); }
   }
   @media (max-width: 1100px) {
@@ -209,6 +209,7 @@
   .p-MEDIA   { background: rgba(234,179,8,0.18);  color: var(--media);  border-top: 3px solid var(--media); }
   .p-BAIXA   { background: rgba(34,197,94,0.18);  color: var(--baixa);  border-top: 3px solid var(--baixa); }
   .p-GERAL   { background: rgba(100,116,139,0.18); color: #94a3b8;       border-top: 3px solid #64748b; }
+  .p-RESPONDIDAS { background: rgba(16,185,129,0.18); color: #34d399;     border-top: 3px solid #10b981; }
 
   /* CARD */
   .card {
@@ -820,8 +821,8 @@ async function manualRefresh() {
 // PRIORITIES TAB
 // ============================================================
 const PRIORITIES = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA'];
-const COLUMNS = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA', 'GERAL'];
-const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'DIVERSOS' };
+const COLUMNS = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA', 'GERAL', 'RESPONDIDAS'];
+const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'DIVERSOS', RESPONDIDAS: 'RESPONDIDAS' };
 
 function renderPriorities() {
   const search = document.getElementById('search-input').value.toLowerCase();
@@ -839,6 +840,8 @@ function renderPriorities() {
   const byPriority = {};
   COLUMNS.forEach(p => byPriority[p] = []);
   chats.forEach(c => {
+    // Replied conversations go to RESPONDIDAS (until new movement returns them).
+    if (resolvedSet.has(c.jid)) { byPriority.RESPONDIDAS.push(c); return; }
     // Ignored conversations go to the DIVERSOS column — UNLESS they mention the
     // owner by name (@ricardo), in which case they return to their priority.
     if (ignoredSet.has(c.jid) && !c.mentionedOwner) { byPriority.GERAL.push(c); return; }
@@ -899,7 +902,7 @@ function cardHtml(c) {
       <div class="card-btns">
         <button class="open-btn" onclick="openChatModal(${JSON.stringify(c.jid)})">💬 Ver conversa & responder</button>
         ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
-          ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
+          ${resolved ? '↩ Reabrir' : '○ Marcar como respondida'}
         </button>`}
         <button class="ignore-btn ${ignored ? 'ignored' : ''}" onclick="toggleIgnore(${JSON.stringify(c.jid)})">
           ${ignored ? '↩ Restaurar' : '✕ Mover p/ Diversos'}
@@ -1010,13 +1013,26 @@ async function sendReply() {
     // for review (WhatsApp's own send screen).
     const url = 'https://wa.me/' + modalChat.phone + '?text=' + encodeURIComponent(text);
     window.open(url, '_blank');
-    hint.textContent = 'Abrindo o WhatsApp com sua mensagem pronta para revisar e enviar.';
+    hint.textContent = 'Abrindo o WhatsApp com sua mensagem pronta. Movida para Respondidas.';
   } else {
     // Group or hidden number: wa.me has no deep link, so copy + open WhatsApp Web.
     try { await navigator.clipboard.writeText(text); } catch(e) {}
     window.open('https://web.whatsapp.com', '_blank');
-    hint.textContent = 'Grupo/contato sem número direto: copiei sua mensagem — cole (Ctrl+V) na conversa no WhatsApp Web.';
+    hint.textContent = 'Copiei sua mensagem — cole (Ctrl+V) no WhatsApp Web. Movida para Respondidas.';
   }
+
+  // Sending a reply moves the conversation to "Respondidas". It returns to the
+  // panel automatically when a new incoming message arrives.
+  await markReplied(modalChat.jid);
+}
+
+async function markReplied(jid) {
+  try {
+    await fetch('/api/resolve/' + encodeURIComponent(jid), { method: 'POST' });
+    resolvedSet.add(jid);
+    renderPriorities();
+    updateSummaryCards();
+  } catch (e) { /* non-fatal */ }
 }
 
 function toggleSummary(id, btn) {
