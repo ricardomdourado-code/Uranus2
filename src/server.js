@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
 import { saveGroups, saveDelegates, saveIgnored, saveResolved } from './state.js';
-import { getRecentMessages, getChatPhone, sendTextMessage, forwardMessage, sendMediaMessage, storeEvents } from './whatsapp.js';
+import { getRecentMessages, getChatPhone, sendTextMessage, forwardMessage, sendMediaMessage, markChatRead, storeEvents } from './whatsapp.js';
 import OpenAI from 'openai';
 
 const app = express();
@@ -84,6 +84,25 @@ app.delete('/api/resolve/:jid', async (req, res) => {
   delete state.repliedAt[jid];
   await saveResolved().catch(() => {});
   res.json({ ok: true, jid, resolved: false });
+});
+
+// POST /api/read/:jid — mark the chat as read on WhatsApp AND as responded/read
+// in the panel (sends read receipts + moves to "Respondidas").
+app.post('/api/read/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  try {
+    await markChatRead(jid);
+  } catch (err) {
+    logger.warn({ err, jid }, 'Falha ao marcar como lido no WhatsApp');
+  }
+  // Reflect read state in the in-memory report so the count drops immediately.
+  const chat = state.analyzedChats.find((c) => c.jid === jid);
+  if (chat) chat.unreadCount = 0;
+  // Mark as responded/read in the panel.
+  state.resolvedJids.add(jid);
+  state.repliedAt[jid] = Date.now();
+  await saveResolved().catch(() => {});
+  res.json({ ok: true, jid, read: true, resolved: true });
 });
 
 // GET /api/analytics

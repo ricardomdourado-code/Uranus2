@@ -599,6 +599,25 @@ export async function forwardMessage(srcJid, msgId, destJid) {
 }
 
 /**
+ * Mark a chat as read on WhatsApp: send read receipts for its recent incoming
+ * messages and clear the local unread counter.
+ */
+export async function markChatRead(jid) {
+  const sock = getSocket();
+  if (!sock) throw new Error('WhatsApp não conectado');
+  const msgs = store.messages.get(jid) || [];
+  const keys = msgs
+    .filter((m) => !m.key?.fromMe && m.key?.id)
+    .slice(-20)
+    .map((m) => m.key);
+  if (keys.length > 0) {
+    await sock.readMessages(keys);
+  }
+  const chat = store.chats.get(jid);
+  if (chat) chat.unreadCount = 0;
+}
+
+/**
  * Send a media message (image / video / audio / document) from a base64 payload.
  * @param {string} jid
  * @param {{ base64: string, mimetype: string, kind: string, filename?: string, caption?: string, ptt?: boolean }} media

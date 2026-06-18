@@ -839,6 +839,7 @@
         <button class="btn" id="modal-summary-btn" onclick="summarizeChat()">🧠 Resumir conversa</button>
         <button class="btn" id="modal-ai-btn" onclick="generateReply()">✨ Gerar resposta</button>
         <button class="btn" onclick="copyReply(this)">📋 Copiar</button>
+        <button class="btn" id="modal-read-btn" onclick="markReadFromModal()">✓✓ Marcar como lida</button>
         <button class="btn primary" id="modal-send-btn" onclick="sendReply()">📤 Enviar no WhatsApp</button>
       </div>
       <div class="modal-hint" id="modal-hint"></div>
@@ -1216,6 +1217,7 @@ function cardHtml(c) {
       ${ignored ? '' : actions}
       <div class="card-btns">
         <button class="open-btn" onclick="openChatModal('${c.jid}')">💬 Ver conversa & responder</button>
+        ${ignored || resolved ? '' : `<button class="resolve-btn" onclick="markRead('${c.jid}', this)">✓✓ Marcar como lida</button>`}
         ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve('${c.jid}', this)">
           ${resolved ? '↩ Reabrir' : '○ Marcar como respondida'}
         </button>`}
@@ -1604,6 +1606,32 @@ async function markReplied(jid) {
     renderPriorities();
     updateSummaryCards();
   } catch (e) { /* non-fatal */ }
+}
+
+// Mark as read on WhatsApp (send read receipts) AND as responded/read in the panel.
+async function markRead(jid, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Lendo...'; }
+  try {
+    const r = await fetch('/api/read/' + encodeURIComponent(jid), { method: 'POST' });
+    if (!r.ok) throw new Error('falhou');
+    resolvedSet.add(jid);
+    const c = (reportData.chats || []).find(x => x.jid === jid);
+    if (c) c.unreadCount = 0;
+    showToast('✓✓ Marcada como lida no WhatsApp');
+    renderPriorities();
+    updateSummaryCards();
+  } catch (e) {
+    showToast('Erro ao marcar como lida', 'critical');
+    if (btn) { btn.disabled = false; btn.textContent = '✓✓ Marcar como lida'; }
+  }
+}
+
+async function markReadFromModal() {
+  if (!modalChat.jid) return;
+  const btn = document.getElementById('modal-read-btn');
+  await markRead(modalChat.jid, btn);
+  document.getElementById('modal-hint').textContent = '✓✓ Marcada como lida e respondida.';
+  setTimeout(() => closeChatModal(), 1000);
 }
 
 function toggleSummary(id, btn) {
