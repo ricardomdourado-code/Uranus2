@@ -13,6 +13,9 @@ import { initServer, updateReportData } from './server.js';
 import { state } from './state.js';
 
 let lastAnalysisTime = 0;
+// Incremental analysis: jid -> last analyzed message timestamp (ms).
+// Only chats with newer activity are re-sent to GPT each cycle (speed + cost).
+const lastAnalyzedTs = new Map();
 
 async function runAnalysisCycle() {
   const sock = getSocket();
@@ -99,29 +102,52 @@ async function runAnalysisCycle() {
       logger.info(`${generalChats.length} conversa(s) em "Geral" (puladas no GPT) | ${toAnalyze.length} para análise.`);
     }
 
-    logger.info(`Carregando mensagens (até ${config.analysis.maxMessagesPerChat} por conversa)...`);
-    const chatsWithMessages = await Promise.all(
-      toAnalyze.map(async (chat) => {
-        const messages = await getChatMessages(sock, chat.jid, config.analysis.maxMessagesPerChat);
-        return { ...chat, messages };
-      })
-    );
+    // Incremental: only chats with NEW activity (or @mention) go to GPT. The
+    // rest are kept by the "second layer" merge in updateReportData, so the
+    // panel stays full while each cycle runs fast.
+    const changed = toAnalyze.filter((c) => {
+      const ts = c.lastMessageTime ? new Date(c.lastMessageTime).getTime() : 0;
+      const prevTs = lastAnalyzedTs.get(c.jid) || 0;
+      return c.mentionedOwner || ts > prevTs;
+    });
+    logger.info(`${changed.length} conversa(s) com novidade desde o último ciclo (de ${toAnalyze.length} ativas).`);
 
-    logger.info('Enviando para análise GPT-4o...');
-    const analyzed = await classifyAndSummarizeChats(chatsWithMessages);
+    let analyzed = [];
+    if (changed.length > 0) {
+      logger.info(`Carregando mensagens (até ${config.analysis.maxMessagesPerChat} por conversa)...`);
+      const chatsWithMessages = await Promise.all(
+        changed.map(async (chat) => {
+          const messages = await getChatMessages(sock, chat.jid, config.analysis.maxMessagesPerChat);
+          return { ...chat, messages };
+        })
+      );
+
+      logger.info('Enviando para análise GPT-4o...');
+      analyzed = await classifyAndSummarizeChats(chatsWithMessages);
+
+      // Mark these chats as analyzed at their current last-message timestamp.
+      for (const c of changed) {
+        const ts = c.lastMessageTime ? new Date(c.lastMessageTime).getTime() : Date.now();
+        lastAnalyzedTs.set(c.jid, ts);
+      }
+    } else {
+      logger.info('Nenhuma conversa nova — apenas atualizando o painel (sem custo de GPT).');
+    }
     const analyzedChats = [...analyzed, ...generalChats];
 
-    const executiveSummary = await generateExecutiveSummary(analyzedChats);
-    const reportText = generateReport(analyzedChats, executiveSummary);
-
-    printReport(reportText);
-
-    if (config.reports.save) {
-      const filePath = saveReport(reportText);
-      logger.info(`Relatório salvo: ${filePath}`);
-    }
-
+    // Always push the merged update to the panel (fast, no GPT).
     updateReportData(analyzedChats);
+
+    // Only spend GPT on the executive summary / report when something changed.
+    if (analyzed.length > 0) {
+      const executiveSummary = await generateExecutiveSummary(analyzedChats);
+      const reportText = generateReport(analyzedChats, executiveSummary);
+      printReport(reportText);
+      if (config.reports.save) {
+        const filePath = saveReport(reportText);
+        logger.info(`Relatório salvo: ${filePath}`);
+      }
+    }
 
     logger.info('✅ Ciclo de análise concluído.');
     logger.info('─'.repeat(60));
