@@ -101,8 +101,8 @@ async function main() {
   logger.info('Conectando ao WhatsApp...');
   await waitForConnection();
 
-  logger.info('Aguardando sincronização inicial (30 segundos)...');
-  await new Promise((r) => setTimeout(r, 30 * 1000));
+  logger.info('Aguardando sincronização inicial (3 minutos)...');
+  await new Promise((r) => setTimeout(r, 3 * 60 * 1000));
 
   logger.info('🚀 Iniciando primeira leitura profunda...');
   startScheduler(runAnalysisCycle);

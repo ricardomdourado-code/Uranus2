@@ -80,7 +80,7 @@ export async function connectToWhatsApp() {
     auth: state,
     printQRInTerminal: false,
     logger: logger.child({ module: 'baileys', level: 'warn' }),
-    syncFullHistory: false,
+    syncFullHistory: true,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
   });
@@ -240,37 +240,10 @@ export async function getAllChats(sock) {
  */
 export async function getChatMessages(sock, jid, limit = 50) {
   try {
-    // First try from our in-memory store (populated during sync)
     const stored = store.messages.get(jid) || [];
-    if (stored.length >= limit) {
-      const recent = stored.slice(-limit);
-      return formatMessages(recent, jid);
-    }
-
-    // Fallback: fetch from WhatsApp servers
-    const cursor = stored.length > 0
-      ? { before: stored[0].key }
-      : undefined;
-
-    const result = await sock.fetchMessagesFromWA(jid, limit, cursor).catch(() => null);
-    const remote = result?.messages || [];
-
-    // Merge stored + remote, deduplicate
-    const all = [...remote, ...stored];
-    const seen = new Set();
-    const merged = all.filter(m => {
-      if (seen.has(m.key.id)) return false;
-      seen.add(m.key.id);
-      return true;
-    });
-
-    // Update store with fetched messages
-    store.messages.set(jid, merged.slice(-500));
-
-    return formatMessages(merged.slice(-limit), jid);
+    return formatMessages(stored.slice(-limit), jid);
   } catch (err) {
     logger.warn({ err, jid }, 'Erro ao carregar mensagens da conversa');
-    // Return whatever we have in store
     const stored = store.messages.get(jid) || [];
     return formatMessages(stored.slice(-limit), jid);
   }
