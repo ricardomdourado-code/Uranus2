@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { connectToWhatsApp } from './whatsapp.js';
+import { connectToWhatsApp, getSocket } from './whatsapp.js';
 import { getAllChats, getChatMessages } from './whatsapp.js';
 import { classifyAndSummarizeChats, generateExecutiveSummary } from './analyzer.js';
 import { generateReport, saveReport, printReport } from './reporter.js';
@@ -9,12 +9,9 @@ import { logger } from './logger.js';
 import { initServer, updateReportData } from './server.js';
 import { state } from './state.js';
 
-let sock = null;
-
-/**
- * Main analysis cycle: fetch all chats, analyze with GPT-4o, generate and save report.
- */
 async function runAnalysisCycle() {
+  // Always use the latest socket instance
+  const sock = getSocket();
   if (!sock) {
     logger.warn('WhatsApp não conectado. Pulando ciclo de análise.');
     return;
@@ -24,16 +21,14 @@ async function runAnalysisCycle() {
   logger.info('🔍 Iniciando ciclo de leitura e análise...');
 
   try {
-    // 1. Fetch all chats
     const chats = await getAllChats(sock);
     logger.info(`${chats.length} conversas encontradas.`);
 
     if (chats.length === 0) {
-      logger.warn('Nenhuma conversa encontrada. O WhatsApp pode ainda estar sincronizando.');
+      logger.warn('Nenhuma conversa encontrada. Tentando novamente no próximo ciclo.');
       return;
     }
 
-    // 2. Fetch messages for each chat
     logger.info(`Carregando mensagens (até ${config.analysis.maxMessagesPerChat} por conversa)...`);
     const chatsWithMessages = await Promise.all(
       chats.map(async (chat) => {
@@ -42,26 +37,19 @@ async function runAnalysisCycle() {
       })
     );
 
-    // 3. Analyze with GPT-4o
     logger.info('Enviando para análise GPT-4o...');
     const analyzedChats = await classifyAndSummarizeChats(chatsWithMessages);
 
-    // 4. Generate executive summary
     const executiveSummary = await generateExecutiveSummary(analyzedChats);
-
-    // 5. Build report
     const reportText = generateReport(analyzedChats, executiveSummary);
 
-    // 6. Print to terminal
     printReport(reportText);
 
-    // 7. Save to file
     if (config.reports.save) {
       const filePath = saveReport(reportText);
       logger.info(`Relatório salvo: ${filePath}`);
     }
 
-    // 8. Update dashboard state
     updateReportData(analyzedChats);
 
     logger.info('✅ Ciclo de análise concluído.');
@@ -71,22 +59,15 @@ async function runAnalysisCycle() {
   }
 }
 
-/**
- * Graceful shutdown handler.
- */
 function setupGracefulShutdown() {
   const shutdown = () => {
     logger.info('Encerrando aplicação...');
     process.exit(0);
   };
-
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
 
-/**
- * Application entry point.
- */
 async function main() {
   logger.info('═'.repeat(60));
   logger.info('  Uranus2 WhatsApp Automação — Iniciando');
@@ -96,24 +77,31 @@ async function main() {
   logger.info('═'.repeat(60));
 
   setupGracefulShutdown();
-
-  // Start dashboard server
   initServer(config.server?.port || 3000);
 
-  try {
-    logger.info('Conectando ao WhatsApp...');
-    sock = await connectToWhatsApp();
-    state.connected = true;
+  // Keep trying to connect until successful
+  const waitForConnection = () => new Promise((resolve) => {
+    const tryConnect = async () => {
+      try {
+        await connectToWhatsApp();
+        state.connected = true;
+        resolve();
+      } catch (err) {
+        logger.warn('Falha na conexão, tentando novamente em 10s...');
+        setTimeout(tryConnect, 10000);
+      }
+    };
+    tryConnect();
+  });
 
-    logger.info('Aguardando sincronização inicial (30 segundos)...');
-    await new Promise((r) => setTimeout(r, 30 * 1000));
+  logger.info('Conectando ao WhatsApp...');
+  await waitForConnection();
 
-    logger.info('🚀 Iniciando primeira leitura profunda...');
-    startScheduler(runAnalysisCycle);
-  } catch (err) {
-    logger.error({ err }, 'Erro fatal na inicialização');
-    process.exit(1);
-  }
+  logger.info('Aguardando sincronização inicial (30 segundos)...');
+  await new Promise((r) => setTimeout(r, 30 * 1000));
+
+  logger.info('🚀 Iniciando primeira leitura profunda...');
+  startScheduler(runAnalysisCycle);
 }
 
 main();
