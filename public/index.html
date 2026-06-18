@@ -1255,6 +1255,9 @@ async function openChatModal(jid) {
   document.getElementById('modal-reply-text').value = '';
   document.getElementById('modal-reply-instruction').value = '';
   document.getElementById('modal-hint').textContent = '';
+  const sendBtn = document.getElementById('modal-send-btn');
+  sendBtn.disabled = false;
+  sendBtn.textContent = '📤 Enviar no WhatsApp';
   document.getElementById('modal-summary-box').style.display = 'none';
   document.getElementById('modal-summary-box').innerHTML = '';
   document.getElementById('modal-participants').style.display = 'none';
