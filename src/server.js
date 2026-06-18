@@ -356,25 +356,33 @@ export function initServer(port = 3000) {
 }
 
 export function updateReportData(analyzedChats) {
-  state.analyzedChats = analyzedChats;
-  state.lastRun = new Date();
+  const prev = state._prevAnalyzedChats || [];
 
   // Track previous critical jids for new-critical detection
   const prevCriticalJids = new Set(
-    (state._prevAnalyzedChats || [])
-      .filter((c) => c.priority === 'CRITICA')
-      .map((c) => c.jid)
+    prev.filter((c) => c.priority === 'CRITICA').map((c) => c.jid)
   );
+
+  // "Segunda camada": MESCLA o resultado novo sobre o anterior em vez de
+  // substituir. Conversas que sairam do top-80 deste ciclo continuam no painel
+  // (camada base); as reanalisadas agora sobrescrevem suas versoes antigas.
+  const merged = new Map();
+  for (const c of prev) merged.set(c.jid, c);
+  for (const c of analyzedChats) merged.set(c.jid, c);
+  const mergedChats = [...merged.values()];
+
+  state.analyzedChats = mergedChats;
+  state.lastRun = new Date();
 
   const newCriticals = analyzedChats.filter(
     (c) => c.priority === 'CRITICA' && !prevCriticalJids.has(c.jid) && !state.ignoredJids.has(c.jid)
   );
 
-  state._prevAnalyzedChats = analyzedChats;
+  state._prevAnalyzedChats = mergedChats;
 
   // Broadcast cycle-complete
   broadcast('cycle-complete', {
-    chats: analyzedChats,
+    chats: mergedChats,
     resolvedJids: [...state.resolvedJids],
     ignoredJids: [...state.ignoredJids],
     lastRun: state.lastRun,
