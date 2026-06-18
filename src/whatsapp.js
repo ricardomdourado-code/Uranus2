@@ -815,24 +815,64 @@ export function getRawMessage(jid, id) {
 }
 
 /**
- * Extract plain text from a WhatsApp message object.
+ * Unwrap WhatsApp "container" messages (ephemeral / view-once / caption wrappers)
+ * to get at the real inner message. Without this, media inside these wrappers is
+ * invisible to extractMessageText/getMessageType and gets filtered out.
  */
-function extractMessageText(message) {
+function unwrapMessage(message) {
+  if (!message) return message;
+  let m = message;
+  let guard = 0;
+  while (m && guard++ < 5) {
+    if (m.ephemeralMessage?.message) { m = m.ephemeralMessage.message; continue; }
+    if (m.viewOnceMessage?.message) { m = m.viewOnceMessage.message; continue; }
+    if (m.viewOnceMessageV2?.message) { m = m.viewOnceMessageV2.message; continue; }
+    if (m.viewOnceMessageV2Extension?.message) { m = m.viewOnceMessageV2Extension.message; continue; }
+    if (m.documentWithCaptionMessage?.message) { m = m.documentWithCaptionMessage.message; continue; }
+    if (m.editedMessage?.message) { m = m.editedMessage.message; continue; }
+    break;
+  }
+  return m;
+}
+
+/**
+ * Extract plain text from a WhatsApp message object. Media always gets a
+ * descriptive label (even without caption) so it never renders blank/disappears.
+ */
+function extractMessageText(rawMessage) {
+  const message = unwrapMessage(rawMessage);
   if (!message) return '';
 
   if (message.conversation) return message.conversation;
   if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
-  if (message.imageMessage?.caption) return `[Imagem] ${message.imageMessage.caption}`;
-  if (message.videoMessage?.caption) return `[Vídeo] ${message.videoMessage.caption}`;
-  if (message.documentMessage?.title) return `[Documento] ${message.documentMessage.title}`;
-  if (message.audioMessage) return '[Áudio]';
+  if (message.imageMessage) {
+    const cap = message.imageMessage.caption;
+    return cap ? `📷 [Foto] ${cap}` : '📷 [Foto]';
+  }
+  if (message.videoMessage) {
+    const cap = message.videoMessage.caption;
+    return cap ? `🎥 [Vídeo] ${cap}` : '🎥 [Vídeo]';
+  }
+  if (message.documentMessage) {
+    const name = message.documentMessage.fileName || message.documentMessage.title || 'arquivo';
+    const cap = message.documentMessage.caption;
+    return cap ? `📎 [Documento] ${name} — ${cap}` : `📎 [Documento] ${name}`;
+  }
+  if (message.audioMessage) return message.audioMessage.ptt ? '🎤 [Mensagem de voz]' : '🎵 [Áudio]';
   if (message.stickerMessage) return '[Figurinha]';
-  if (message.locationMessage) return '[Localização]';
-  if (message.contactMessage) return `[Contato] ${message.contactMessage.displayName || ''}`;
-  if (message.pollCreationMessage) return `[Enquete] ${message.pollCreationMessage.name || ''}`;
+  if (message.locationMessage) return '📍 [Localização]';
+  if (message.liveLocationMessage) return '📍 [Localização ao vivo]';
+  if (message.contactMessage) return `👤 [Contato] ${message.contactMessage.displayName || ''}`;
+  if (message.contactsArrayMessage) return `👤 [Contatos] ${message.contactsArrayMessage.displayName || ''}`;
+  if (message.pollCreationMessage) return `📊 [Enquete] ${message.pollCreationMessage.name || ''}`;
+  if (message.pollCreationMessageV3) return `📊 [Enquete] ${message.pollCreationMessageV3.name || ''}`;
   if (message.reactionMessage) return `[Reação] ${message.reactionMessage.text || ''}`;
   if (message.buttonsMessage?.contentText) return message.buttonsMessage.contentText;
+  if (message.buttonsResponseMessage?.selectedDisplayText) return message.buttonsResponseMessage.selectedDisplayText;
   if (message.listMessage?.description) return message.listMessage.description;
+  if (message.listResponseMessage?.title) return message.listResponseMessage.title;
+  if (message.templateButtonReplyMessage?.selectedDisplayText) return message.templateButtonReplyMessage.selectedDisplayText;
+  if (message.protocolMessage) return ''; // system messages (revoke, etc.) — ignore
 
   return '';
 }
@@ -840,7 +880,8 @@ function extractMessageText(message) {
 /**
  * Determine message type string.
  */
-function getMessageType(message) {
+function getMessageType(rawMessage) {
+  const message = unwrapMessage(rawMessage);
   if (!message) return 'unknown';
   if (message.conversation || message.extendedTextMessage) return 'text';
   if (message.imageMessage) return 'image';
@@ -848,9 +889,10 @@ function getMessageType(message) {
   if (message.audioMessage) return 'audio';
   if (message.documentMessage) return 'document';
   if (message.stickerMessage) return 'sticker';
-  if (message.locationMessage) return 'location';
-  if (message.contactMessage) return 'contact';
-  if (message.pollCreationMessage) return 'poll';
+  if (message.locationMessage || message.liveLocationMessage) return 'location';
+  if (message.contactMessage || message.contactsArrayMessage) return 'contact';
+  if (message.pollCreationMessage || message.pollCreationMessageV3) return 'poll';
   if (message.reactionMessage) return 'reaction';
+  if (message.protocolMessage) return 'unknown';
   return 'unknown';
 }

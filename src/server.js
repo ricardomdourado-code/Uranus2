@@ -282,36 +282,45 @@ app.get('/api/messages/:jid', (req, res) => {
 // POST /api/summarize — summarize WHAT WAS DISCUSSED (not a reply draft)
 const _openaiForSummary = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 app.post('/api/summarize', async (req, res) => {
-  const { jid } = req.body || {};
-  if (!jid) return res.status(400).json({ error: 'jid required' });
-  const chat = state.analyzedChats.find((c) => c.jid === jid);
-  const messages = getRecentMessages(jid, 40);
+  // Everything is wrapped so we ALWAYS return JSON (never an HTML 500 page,
+  // which would break the browser's r.json() and show a generic error).
+  try {
+    const { jid } = req.body || {};
+    if (!jid) return res.status(400).json({ error: 'jid required' });
+    const chat = state.analyzedChats.find((c) => c.jid === jid);
+    let messages = [];
+    try { messages = getRecentMessages(jid, 40); } catch (e) { messages = []; }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.json({ summary: chat?.summary || 'Sem resumo disponível.' });
-  }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.json({ summary: chat?.summary || 'Sem resumo disponível (OPENAI_API_KEY não configurada).' });
+    }
 
-  const convo = messages
-    .map((m) => `${m.fromMe ? 'Ricardo' : (m.senderName || 'Contato')}: ${m.text}`)
-    .join('\n');
+    const convo = messages
+      .map((m) => `${m.fromMe ? 'Ricardo' : (m.senderName || 'Contato')}: ${m.text}`)
+      .join('\n');
 
-  const prompt = `Resuma de forma objetiva e clara, em português, O QUE FOI TRATADO nesta conversa do WhatsApp (${chat?.name || jid}).
+    if (!convo) {
+      return res.json({ summary: chat?.summary || 'Não há mensagens recentes desta conversa para resumir.' });
+    }
+
+    const prompt = `Resuma de forma objetiva e clara, em português, O QUE FOI TRATADO nesta conversa do WhatsApp (${chat?.name || jid}).
 Não escreva uma resposta. Faça um resumo executivo em tópicos curtos: assunto principal, decisões/pendências e o que precisa de atenção.
 
 Conversa:
-${convo || '(sem mensagens recentes)'}`;
+${convo}`;
 
-  try {
     const response = await _openaiForSummary.chat.completions.create({
       model: config.openai.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens: 500,
     });
-    res.json({ summary: (response.choices[0]?.message?.content || '').trim() });
+    const summary = (response.choices[0]?.message?.content || '').trim();
+    res.json({ summary: summary || 'A IA não retornou um resumo.' });
   } catch (err) {
     logger.error({ err }, 'Erro ao resumir conversa');
-    res.json({ summary: `Erro ao gerar resumo: ${err.message}` });
+    // 200 + summary text so the dashboard shows the reason inline.
+    res.json({ summary: `⚠️ Erro ao gerar resumo: ${err?.message || err}` });
   }
 });
 
