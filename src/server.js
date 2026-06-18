@@ -87,14 +87,26 @@ app.delete('/api/resolve/:jid', async (req, res) => {
 
 // GET /api/analytics
 app.get('/api/analytics', (req, res) => {
-  // Ignored ("Geral") conversations must not skew the indicators.
+  // Ignored ("Diversos") conversations must not skew the indicators.
   const chats = state.analyzedChats.filter((c) => !state.ignoredJids.has(c.jid));
+  const diversosChats = state.analyzedChats.filter((c) => state.ignoredJids.has(c.jid));
+
+  // Aggregate everyone in "Diversos" as a SINGLE group entry.
+  const diversosAgg = diversosChats.length > 0
+    ? {
+        name: `Diversos (${diversosChats.length} conversas)`,
+        unreadCount: diversosChats.reduce((s, c) => s + (c.unreadCount || 0), 0),
+        type: 'Diversos',
+        count: diversosChats.length,
+      }
+    : null;
 
   // Top senders by unreadCount
-  const topSenders = [...chats]
+  let topSenders = [...chats]
     .sort((a, b) => (b.unreadCount || 0) - (a.unreadCount || 0))
     .slice(0, 10)
     .map((c) => ({ name: c.name, unreadCount: c.unreadCount || 0, type: c.type }));
+  if (diversosAgg) topSenders = [...topSenders.slice(0, 9), diversosAgg];
 
   // Priority distribution
   const priorityDistribution = { CRITICA: 0, ALTA: 0, MEDIA: 0, BAIXA: 0 };
@@ -123,7 +135,7 @@ app.get('/api/analytics', (req, res) => {
     }
   }
 
-  res.json({ topSenders, priorityDistribution, mostActiveGroups, hourlyVolume });
+  res.json({ topSenders, priorityDistribution, mostActiveGroups, hourlyVolume, diversos: diversosAgg });
 });
 
 // GET /api/history — list report files
@@ -242,8 +254,45 @@ app.get('/api/messages/:jid', (req, res) => {
     type: chat?.type || 'Contato',
     phone: getChatPhone(jid),
     suggestedResponse: chat?.suggestedResponse || null,
+    participants: chat?.participants || [],
     messages,
   });
+});
+
+// POST /api/summarize — summarize WHAT WAS DISCUSSED (not a reply draft)
+const _openaiForSummary = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+app.post('/api/summarize', async (req, res) => {
+  const { jid } = req.body || {};
+  if (!jid) return res.status(400).json({ error: 'jid required' });
+  const chat = state.analyzedChats.find((c) => c.jid === jid);
+  const messages = getRecentMessages(jid, 40);
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.json({ summary: chat?.summary || 'Sem resumo disponível.' });
+  }
+
+  const convo = messages
+    .map((m) => `${m.fromMe ? 'Ricardo' : (m.senderName || 'Contato')}: ${m.text}`)
+    .join('\n');
+
+  const prompt = `Resuma de forma objetiva e clara, em português, O QUE FOI TRATADO nesta conversa do WhatsApp (${chat?.name || jid}).
+Não escreva uma resposta. Faça um resumo executivo em tópicos curtos: assunto principal, decisões/pendências e o que precisa de atenção.
+
+Conversa:
+${convo || '(sem mensagens recentes)'}`;
+
+  try {
+    const response = await _openaiForSummary.chat.completions.create({
+      model: config.openai.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 500,
+    });
+    res.json({ summary: (response.choices[0]?.message?.content || '').trim() });
+  } catch (err) {
+    logger.error({ err }, 'Erro ao resumir conversa');
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/generate-reply — draft/refine a reply with AI using recent messages

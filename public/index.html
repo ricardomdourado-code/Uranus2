@@ -451,6 +451,16 @@
     width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: 8px;
     background: #0f1626; border: 1px solid var(--border); color: var(--text); font-size: 12px;
   }
+  .modal-participants {
+    background: rgba(59,130,246,0.10); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+    font-size: 12px; color: #cbd5e1; line-height: 1.6;
+  }
+  .modal-summary-box {
+    background: rgba(16,185,129,0.10); border: 1px solid #10b981;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+    font-size: 13px; color: #d1fae5; line-height: 1.6;
+  }
   .modal-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .btn {
     border: 1px solid var(--border); background: #243044; color: var(--text);
@@ -684,13 +694,16 @@
       </div>
       <button class="btn ghost" onclick="closeChatModal()">✕ Fechar</button>
     </div>
+    <div id="modal-participants" class="modal-participants" style="display:none;"></div>
+    <div id="modal-summary-box" class="modal-summary-box" style="display:none;"></div>
     <div class="modal-messages" id="modal-messages">Carregando mensagens...</div>
     <div class="modal-reply">
       <label class="reply-label">Sua resposta</label>
       <textarea id="modal-reply-text" class="reply-textarea" rows="4" placeholder="Escreva ou gere uma resposta com IA..."></textarea>
       <input id="modal-reply-instruction" class="reply-instruction" placeholder="(Opcional) Instrução para a IA: ex. 'seja mais formal', 'peça o prazo'" />
       <div class="modal-actions">
-        <button class="btn" id="modal-ai-btn" onclick="generateReply()">✨ Gerar com IA</button>
+        <button class="btn" id="modal-summary-btn" onclick="summarizeChat()">🧠 Resumir conversa</button>
+        <button class="btn" id="modal-ai-btn" onclick="generateReply()">✨ Gerar resposta</button>
         <button class="btn" onclick="copyReply(this)">📋 Copiar</button>
         <button class="btn primary" id="modal-send-btn" onclick="sendReply()">📤 Enviar no WhatsApp</button>
       </div>
@@ -1015,16 +1028,28 @@ async function openChatModal(jid) {
   document.getElementById('modal-reply-text').value = '';
   document.getElementById('modal-reply-instruction').value = '';
   document.getElementById('modal-hint').textContent = '';
+  document.getElementById('modal-summary-box').style.display = 'none';
+  document.getElementById('modal-summary-box').innerHTML = '';
+  document.getElementById('modal-participants').style.display = 'none';
+  document.getElementById('modal-participants').innerHTML = '';
 
   try {
     const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
-    modalChat = { jid: d.jid, phone: d.phone, type: d.type, name: d.name };
+    modalChat = { jid: d.jid, phone: d.phone, type: d.type, name: d.name, participants: d.participants || [] };
 
     document.getElementById('modal-title').textContent = d.name || jid;
     document.getElementById('modal-sub').textContent =
       (d.type || '') + (d.phone ? ' · +' + d.phone : ' · sem nº direto (grupo/oculto)');
+
+    // Group participants (item #2)
+    const pbox = document.getElementById('modal-participants');
+    if (d.participants && d.participants.length) {
+      pbox.style.display = 'block';
+      pbox.innerHTML = `<strong>👥 Participantes (${d.participants.length}):</strong> ` +
+        d.participants.map(p => escHtml(p.name || p.number || '')).filter(Boolean).join(' · ');
+    }
 
     const msgs = d.messages || [];
     const box = document.getElementById('modal-messages');
@@ -1039,12 +1064,34 @@ async function openChatModal(jid) {
         </div>`).join('');
       box.scrollTop = box.scrollHeight;
     }
-
-    if (d.suggestedResponse) {
-      document.getElementById('modal-reply-text').value = d.suggestedResponse;
-    }
+    // Item #7: do NOT pre-load a suggested reply — start with an empty box.
   } catch(e) {
     document.getElementById('modal-messages').innerHTML = '<div style="color:var(--critica)">Erro ao carregar a conversa.</div>';
+  }
+}
+
+async function summarizeChat() {
+  const btn = document.getElementById('modal-summary-btn');
+  const box = document.getElementById('modal-summary-box');
+  btn.disabled = true; btn.textContent = '⏳ Resumindo...';
+  box.style.display = 'block';
+  box.innerHTML = '<em>Gerando resumo do que foi tratado...</em>';
+  try {
+    const r = await fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid: modalChat.jid })
+    });
+    const d = await r.json();
+    if (d.summary) {
+      box.innerHTML = '<strong>🧠 Resumo da conversa:</strong><br>' + escHtml(d.summary).replace(/\n/g, '<br>');
+    } else {
+      box.innerHTML = '<span style="color:var(--critica)">Não foi possível gerar o resumo.</span>';
+    }
+  } catch(e) {
+    box.innerHTML = '<span style="color:var(--critica)">Erro ao gerar o resumo.</span>';
+  } finally {
+    btn.disabled = false; btn.textContent = '🧠 Resumir conversa';
   }
 }
 
@@ -1068,7 +1115,7 @@ async function generateReply() {
   } catch(e) {
     showToast('Erro ao gerar resposta com IA');
   } finally {
-    btn.disabled = false; btn.textContent = '✨ Gerar com IA';
+    btn.disabled = false; btn.textContent = '✨ Gerar resposta';
   }
 }
 
