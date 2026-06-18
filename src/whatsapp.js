@@ -42,6 +42,7 @@ const store = {
       }
       const totalChats = this.chats.size;
       const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
+      logger.info(`📊 Store acumulado: ${totalChats} conversas, ${totalMsgs} mensagens no total`);
       if (totalChats > 0 || totalMsgs > 0) {
         storeEvents.emit('history-ready', { chats: totalChats, messages: totalMsgs, isLatest });
       }
