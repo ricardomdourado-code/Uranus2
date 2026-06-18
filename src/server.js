@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
 import { saveGroups, saveDelegates, saveIgnored } from './state.js';
+import { getRecentMessages, getChatPhone, sendTextMessage } from './whatsapp.js';
 import OpenAI from 'openai';
 
 const app = express();
@@ -213,6 +214,74 @@ app.post('/api/delegate', async (req, res) => {
   state.delegates[jid] = assignee;
   await saveDelegates();
   res.json({ ok: true, jid, assignee });
+});
+
+// GET /api/messages/:jid — recent messages + metadata for the detail view
+app.get('/api/messages/:jid', (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+  const chat = state.analyzedChats.find((c) => c.jid === jid);
+  const messages = getRecentMessages(jid, limit);
+  res.json({
+    jid,
+    name: chat?.name || jid,
+    type: chat?.type || 'Contato',
+    phone: getChatPhone(jid),
+    suggestedResponse: chat?.suggestedResponse || null,
+    messages,
+  });
+});
+
+// POST /api/generate-reply — draft/refine a reply with AI using recent messages
+const _openaiForReply = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+app.post('/api/generate-reply', async (req, res) => {
+  const { jid, instruction } = req.body || {};
+  if (!jid) return res.status(400).json({ error: 'jid required' });
+  const chat = state.analyzedChats.find((c) => c.jid === jid);
+  const messages = getRecentMessages(jid, 20);
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.json({ reply: chat?.suggestedResponse || 'Olá! Recebi sua mensagem e retorno em breve.' });
+  }
+
+  const convo = messages
+    .map((m) => `${m.fromMe ? 'Ricardo' : (m.senderName || 'Contato')}: ${m.text}`)
+    .join('\n');
+
+  const prompt = `Você é assistente executivo de Ricardo Dourado (Uranus2).
+Com base na conversa abaixo do WhatsApp, escreva uma resposta curta, profissional e cordial em português, na primeira pessoa, pronta para enviar.
+${instruction ? `\nInstrução adicional do Ricardo: ${instruction}\n` : ''}
+Conversa (${chat?.name || jid}):
+${convo || '(sem mensagens recentes)'}
+
+Responda APENAS com o texto da mensagem, sem aspas e sem comentários.`;
+
+  try {
+    const response = await _openaiForReply.chat.completions.create({
+      model: config.openai.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.5,
+      max_tokens: 400,
+    });
+    res.json({ reply: (response.choices[0]?.message?.content || '').trim() });
+  } catch (err) {
+    logger.error({ err }, 'Erro ao gerar resposta');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/send/:jid — send a message directly via WhatsApp (for groups/LID)
+app.post('/api/send/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  const { text } = req.body || {};
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
+  try {
+    await sendTextMessage(jid, text.trim());
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, jid }, 'Erro ao enviar mensagem');
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Generate email

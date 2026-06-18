@@ -421,6 +421,38 @@ export async function getChatMessages(sock, jid, limit = 50) {
   }
 }
 
+/**
+ * Read recent messages for a chat directly from the store (no socket needed).
+ * Used by the dashboard detail view.
+ */
+export function getRecentMessages(jid, limit = 20) {
+  const stored = store.messages.get(jid) || [];
+  return formatMessages(stored.slice(-limit), jid);
+}
+
+/**
+ * Best-effort phone number (digits only) for a chat, for building wa.me links.
+ * Returns null for groups and @lid identifiers (no usable phone number).
+ */
+export function getChatPhone(jid) {
+  if (!jid || jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('@lid')) {
+    return null;
+  }
+  const decoded = jidDecode(jid);
+  const user = decoded?.user || jid.split('@')[0];
+  const digits = (user || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits : null;
+}
+
+/**
+ * Send a text message to a chat via the active socket.
+ */
+export async function sendTextMessage(jid, text) {
+  const sock = getSocket();
+  if (!sock) throw new Error('WhatsApp não conectado');
+  await sock.sendMessage(jid, { text });
+}
+
 function formatMessages(messages, jid) {
   return messages.map((msg) => ({
     id: msg.key?.id,

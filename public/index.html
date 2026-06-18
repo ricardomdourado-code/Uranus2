@@ -358,6 +358,79 @@
   .ignore-btn:hover { border-color: #64748b; color: #cbd5e1; }
   .ignore-btn.ignored { border-color: var(--accent); color: var(--accent); }
 
+  .open-btn {
+    width: 100%;
+    border: 1px solid var(--accent);
+    background: rgba(59,130,246,0.12);
+    color: var(--accent);
+    border-radius: 6px;
+    padding: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    transition: background 0.2s;
+  }
+  .open-btn:hover { background: rgba(59,130,246,0.25); }
+  .card-clickable { cursor: pointer; }
+  .card-clickable:hover .card-name { color: var(--accent); }
+
+  /* CHAT MODAL */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--card-bg, #1a2233);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%; max-width: 640px;
+    max-height: 88vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 16px 18px; border-bottom: 1px solid var(--border);
+  }
+  .modal-title { font-size: 16px; font-weight: 700; }
+  .modal-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .modal-messages {
+    flex: 1; overflow-y: auto; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    min-height: 200px;
+  }
+  .msg { max-width: 78%; padding: 7px 11px; border-radius: 10px; font-size: 13px; line-height: 1.4; }
+  .msg .msg-sender { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 2px; }
+  .msg .msg-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; text-align: right; }
+  .msg.them { align-self: flex-start; background: #243044; }
+  .msg.me { align-self: flex-end; background: rgba(59,130,246,0.22); }
+  .modal-reply { padding: 14px 18px; border-top: 1px solid var(--border); }
+  .reply-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+  .reply-textarea {
+    width: 100%; margin-top: 6px; padding: 9px; border-radius: 8px;
+    background: #0f1626; border: 1px solid var(--border); color: var(--text);
+    font-size: 13px; resize: vertical; font-family: inherit;
+  }
+  .reply-instruction {
+    width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: 8px;
+    background: #0f1626; border: 1px solid var(--border); color: var(--text); font-size: 12px;
+  }
+  .modal-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid var(--border); background: #243044; color: var(--text);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.ghost { background: none; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .modal-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+
   /* ANALYTICS */
   .analytics-grid {
     display: grid;
@@ -569,6 +642,31 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- CHAT DETAIL MODAL -->
+<div class="modal-overlay" id="chat-modal" onclick="if(event.target===this)closeChatModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modal-title">Conversa</div>
+        <div class="modal-sub" id="modal-sub"></div>
+      </div>
+      <button class="btn ghost" onclick="closeChatModal()">✕ Fechar</button>
+    </div>
+    <div class="modal-messages" id="modal-messages">Carregando mensagens...</div>
+    <div class="modal-reply">
+      <label class="reply-label">Sua resposta</label>
+      <textarea id="modal-reply-text" class="reply-textarea" rows="4" placeholder="Escreva ou gere uma resposta com IA..."></textarea>
+      <input id="modal-reply-instruction" class="reply-instruction" placeholder="(Opcional) Instrução para a IA: ex. 'seja mais formal', 'peça o prazo'" />
+      <div class="modal-actions">
+        <button class="btn" id="modal-ai-btn" onclick="generateReply()">✨ Gerar com IA</button>
+        <button class="btn" onclick="copyReply(this)">📋 Copiar</button>
+        <button class="btn primary" id="modal-send-btn" onclick="sendReply()">📤 Enviar no WhatsApp</button>
+      </div>
+      <div class="modal-hint" id="modal-hint"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 // ============================================================
@@ -785,17 +883,18 @@ function cardHtml(c) {
 
   return `
     <div class="card ${resolved ? 'resolved' : ''}" id="card-${jidEnc}">
-      <div class="card-top">
+      <div class="card-top card-clickable" onclick="openChatModal(${JSON.stringify(c.jid)})" title="Ver conversa e responder">
         <div class="card-name">${escHtml(c.name)}</div>
         <span class="badge ${typeBadge}">${typeLabel}</span>
         ${c.unreadCount ? `<span class="badge badge-unread">${c.unreadCount}</span>` : ''}
       </div>
       <div class="card-time">${fmtTime(c.lastMessageTime)}</div>
-      <div class="card-summary collapsed" id="${summaryId}">${escHtml(c.summary)}</div>
+      <div class="card-summary collapsed card-clickable" id="${summaryId}" onclick="openChatModal(${JSON.stringify(c.jid)})">${escHtml(c.summary)}</div>
       <button class="expand-btn" onclick="toggleSummary('${summaryId}', this)">+ Ver mais</button>
       ${ignored ? '' : suggestion}
       ${ignored ? '' : actions}
       <div class="card-btns">
+        <button class="open-btn" onclick="openChatModal(${JSON.stringify(c.jid)})">💬 Ver conversa & responder</button>
         ${ignored ? '' : `<button class="resolve-btn ${resolved ? 'resolved' : ''}" onclick="toggleResolve(${JSON.stringify(c.jid)}, this)">
           ${resolved ? '✓ Resolvido' : '○ Marcar como resolvido'}
         </button>`}
@@ -817,6 +916,103 @@ async function toggleIgnore(jid) {
     updateSummaryCards();
   } catch(e) {
     showToast('Erro ao atualizar conversa');
+  }
+}
+
+// ============================================================
+// CHAT DETAIL MODAL
+// ============================================================
+let modalChat = { jid: null, phone: null, type: null, name: null };
+
+async function openChatModal(jid) {
+  const overlay = document.getElementById('chat-modal');
+  overlay.classList.add('open');
+  document.getElementById('modal-title').textContent = 'Carregando...';
+  document.getElementById('modal-sub').textContent = '';
+  document.getElementById('modal-messages').innerHTML = 'Carregando mensagens...';
+  document.getElementById('modal-reply-text').value = '';
+  document.getElementById('modal-reply-instruction').value = '';
+  document.getElementById('modal-hint').textContent = '';
+
+  try {
+    const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
+    const d = await r.json();
+    modalChat = { jid: d.jid, phone: d.phone, type: d.type, name: d.name };
+
+    document.getElementById('modal-title').textContent = d.name || jid;
+    document.getElementById('modal-sub').textContent =
+      (d.type || '') + (d.phone ? ' · +' + d.phone : ' · sem nº direto (grupo/oculto)');
+
+    const msgs = d.messages || [];
+    const box = document.getElementById('modal-messages');
+    if (msgs.length === 0) {
+      box.innerHTML = '<div style="color:var(--text-muted);text-align:center;margin-top:40px;">Nenhuma mensagem encontrada para esta conversa.</div>';
+    } else {
+      box.innerHTML = msgs.map(m => `
+        <div class="msg ${m.fromMe ? 'me' : 'them'}">
+          ${m.fromMe ? '' : `<div class="msg-sender">${escHtml(m.senderName || '')}</div>`}
+          <div>${escHtml(m.text || '')}</div>
+          <div class="msg-time">${fmtTime(m.timestamp)}</div>
+        </div>`).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    if (d.suggestedResponse) {
+      document.getElementById('modal-reply-text').value = d.suggestedResponse;
+    }
+  } catch(e) {
+    document.getElementById('modal-messages').innerHTML = '<div style="color:var(--critica)">Erro ao carregar a conversa.</div>';
+  }
+}
+
+function closeChatModal() {
+  document.getElementById('chat-modal').classList.remove('open');
+}
+
+async function generateReply() {
+  const btn = document.getElementById('modal-ai-btn');
+  const instruction = document.getElementById('modal-reply-instruction').value.trim();
+  btn.disabled = true; btn.textContent = '⏳ Gerando...';
+  try {
+    const r = await fetch('/api/generate-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid: modalChat.jid, instruction })
+    });
+    const d = await r.json();
+    if (d.reply) document.getElementById('modal-reply-text').value = d.reply;
+    else showToast('Não foi possível gerar a resposta');
+  } catch(e) {
+    showToast('Erro ao gerar resposta com IA');
+  } finally {
+    btn.disabled = false; btn.textContent = '✨ Gerar com IA';
+  }
+}
+
+function copyReply(btn) {
+  const text = document.getElementById('modal-reply-text').value;
+  navigator.clipboard.writeText(text).then(() => {
+    const o = btn.textContent; btn.textContent = '✓ Copiado';
+    setTimeout(() => btn.textContent = o, 2000);
+  });
+}
+
+async function sendReply() {
+  const text = document.getElementById('modal-reply-text').value.trim();
+  if (!text) { showToast('Escreva uma resposta primeiro'); return; }
+  const hint = document.getElementById('modal-hint');
+
+  if (modalChat.phone) {
+    // Individual contact with a real number: open WhatsApp with the text ready
+    // for review (WhatsApp's own send screen).
+    const url = 'https://wa.me/' + modalChat.phone + '?text=' + encodeURIComponent(text);
+    window.open(url, '_blank');
+    hint.textContent = 'Abrindo o WhatsApp com sua mensagem pronta para revisar e enviar.';
+  } else {
+    // Group or hidden number: wa.me has no deep link, so copy + open WhatsApp Web.
+    try { await navigator.clipboard.writeText(text); } catch(e) {}
+    window.open('https://web.whatsapp.com', '_blank');
+    hint.textContent = 'Grupo/contato sem número direto: copiei sua mensagem — cole (Ctrl+V) na conversa no WhatsApp Web.';
   }
 }
 
