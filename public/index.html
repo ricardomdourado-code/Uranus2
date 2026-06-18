@@ -886,16 +886,25 @@ const PRIORITIES = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA'];
 const COLUMNS = ['CRITICA', 'ALTA', 'MEDIA', 'BAIXA', 'GERAL', 'RESPONDIDAS'];
 const P_LABELS = { CRITICA: 'CRÍTICA', ALTA: 'ALTA', MEDIA: 'MÉDIA', BAIXA: 'BAIXA', GERAL: 'DIVERSOS', RESPONDIDAS: 'RESPONDIDAS' };
 
+function normalize(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 function renderPriorities() {
-  const search = document.getElementById('search-input').value.toLowerCase();
+  const raw = document.getElementById('search-input').value;
+  const search = normalize(raw);
   const typeFilter = document.getElementById('type-filter').value;
   const hideResolved = document.getElementById('hide-resolved').checked;
   const grid = document.getElementById('priority-grid');
 
   const chats = (reportData.chats || []).filter(c => {
     if (search) {
-      const haystack = [c.name, c.summary, c.lastMessage, c.priorityReason]
-        .filter(Boolean).join(' ').toLowerCase();
+      // Build haystack: name, summary, last message, participants (for groups)
+      const parts = [c.name, c.summary, c.lastMessage, c.priorityReason];
+      if (c.participants && c.participants.length) {
+        c.participants.forEach(p => parts.push(p.name || p.number || ''));
+      }
+      const haystack = normalize(parts.filter(Boolean).join(' '));
       if (!haystack.includes(search)) return false;
     }
     if (typeFilter && c.type !== typeFilter) return false;

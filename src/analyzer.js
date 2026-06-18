@@ -215,7 +215,9 @@ export async function classifyAndSummarizeChats(chatsWithMessages) {
           urgencyScore: result.urgencyScore || 5,
           unreadCount: original?.unreadCount || 0,
           lastMessageTime: original?.lastMessageTime || null,
+          lastMessage: original?.lastMessage || null,
           type: original?.type || 'Contato',
+          participants: original?.participants || [],
           mentionedOwner: original?.mentionedOwner || false,
         });
       }
@@ -236,7 +238,9 @@ export async function classifyAndSummarizeChats(chatsWithMessages) {
             urgencyScore: 1,
             unreadCount: original?.unreadCount || 0,
             lastMessageTime: original?.lastMessageTime || null,
+            lastMessage: original?.lastMessage || null,
             type: original?.type || 'Contato',
+            participants: original?.participants || [],
             mentionedOwner: original?.mentionedOwner || false,
           });
         }
