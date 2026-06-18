@@ -28,6 +28,7 @@ let saveTimer = null;
 const store = {
   chats: new Map(),
   messages: new Map(),
+  contacts: new Map(), // jid -> { name, notify, verifiedName }
 
   /** Load persisted chats/messages from disk into memory (called on startup). */
   load() {
@@ -39,6 +40,9 @@ const store = {
       }
       for (const [jid, msgs] of Object.entries(raw.messages || {})) {
         this.messages.set(jid, msgs);
+      }
+      for (const [id, contact] of Object.entries(raw.contacts || {})) {
+        this.contacts.set(id, contact);
       }
       const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
       logger.info(`💾 Histórico carregado do disco: ${this.chats.size} conversas, ${totalMsgs} mensagens.`);
@@ -64,7 +68,9 @@ const store = {
       for (const [jid, msgs] of this.messages.entries()) {
         messages[jid] = msgs.slice(-MAX_PERSISTED_PER_CHAT);
       }
-      writeFileSync(STORE_FILE, JSON.stringify({ chats, messages }));
+      const contacts = {};
+      for (const [id, contact] of this.contacts.entries()) contacts[id] = contact;
+      writeFileSync(STORE_FILE, JSON.stringify({ chats, messages, contacts }));
     } catch (err) {
       logger.warn({ err }, 'Falha ao salvar histórico no disco.');
     }
@@ -83,6 +89,11 @@ const store = {
         // Auto-create chat entry from messages if not present
         if (!this.chats.has(jid)) {
           this.chats.set(jid, { id: jid, unreadCount: 0, name: null });
+        }
+        // Remember a human-readable name from the message's pushName
+        if (!jid.endsWith('@g.us') && !msg.key?.fromMe && msg.pushName) {
+          const chat = this.chats.get(jid);
+          if (!chat.name) chat.name = msg.pushName;
         }
         // Count unread (messages not from me)
         if (!msg.key?.fromMe) {
@@ -129,13 +140,39 @@ const store = {
         if (arr.length > 500) arr.shift();
         // Track new incoming messages as unread on the chat entry
         if (!this.chats.has(jid)) this.chats.set(jid, { id: jid, unreadCount: 0, name: null });
+        const chat = this.chats.get(jid);
+        if (!jid.endsWith('@g.us') && !msg.key?.fromMe && msg.pushName && !chat.name) {
+          chat.name = msg.pushName;
+        }
         if (!msg.key?.fromMe) {
-          const chat = this.chats.get(jid);
           chat.unreadCount = (chat.unreadCount || 0) + 1;
         }
       }
       this.scheduleSave();
     });
+    ev.on('contacts.set', ({ contacts }) => {
+      for (const c of (contacts || [])) {
+        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName });
+      }
+    });
+    ev.on('contacts.upsert', (contacts) => {
+      for (const c of (contacts || [])) {
+        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName });
+      }
+    });
+    ev.on('contacts.update', (updates) => {
+      for (const u of (updates || [])) {
+        const existing = this.contacts.get(u.id) || {};
+        this.contacts.set(u.id, { ...existing, ...u });
+      }
+    });
+  },
+
+  /** Best human-readable name for a JID: contact > stored chat name > number. */
+  resolveName(jid) {
+    const c = this.contacts.get(jid);
+    if (c) return c.name || c.verifiedName || c.notify || null;
+    return null;
   },
 };
 
@@ -280,7 +317,9 @@ export async function getAllChats(sock) {
     if (!jid || jid === 'status@broadcast') continue;
 
     const isGroup = jid.endsWith('@g.us');
-    let name = chat.name || chat.subject || jidToReadable(jid);
+    // Prefer: saved chat/group subject > contact name > pushName captured on chat
+    // > last resort the readable number/LID.
+    let name = chat.name || chat.subject || store.resolveName(jid) || jidToReadable(jid);
     let participants = [];
 
     if (isGroup) {
