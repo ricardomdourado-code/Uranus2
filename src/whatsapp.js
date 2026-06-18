@@ -32,7 +32,12 @@ const store = {
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
         // Auto-create chat entry from messages if not present
         if (!this.chats.has(jid)) {
-          this.chats.set(jid, { id: jid, unreadCount: 0 });
+          this.chats.set(jid, { id: jid, unreadCount: 0, name: null });
+        }
+        // Count unread (messages not from me)
+        if (!msg.key?.fromMe) {
+          const chat = this.chats.get(jid);
+          chat.unreadCount = (chat.unreadCount || 0) + 1;
         }
       }
       const totalChats = this.chats.size;

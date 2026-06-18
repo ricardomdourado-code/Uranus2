@@ -15,8 +15,8 @@ export const config = {
     intervalHours: parseInt(process.env.READ_INTERVAL_HOURS || '3', 10),
   },
   analysis: {
-    maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '50', 10),
-    batchSize: 20,
+    maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '10', 10),
+    batchSize: 10,
   },
   reports: {
     save: process.env.SAVE_REPORTS !== 'false',
