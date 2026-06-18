@@ -154,7 +154,7 @@ const store = {
           jid,
           name: chat.name || store.resolveName(jid) || null,
           fromMe: !!msg.key?.fromMe,
-          text: extractMessageText(msg.message),
+          text: resolveMentionsInText(extractMessageText(msg.message)),
           unreadCount: chat.unreadCount || 0,
           timestamp: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
           isGroup: jid.endsWith('@g.us'),
@@ -303,6 +303,62 @@ function jidToReadable(jid) {
   return decoded.user || jid;
 }
 
+// --- Name index: maps a sender JID (and its bare number) to a display name ---
+// Built from the pushName attached to every stored message, merged with the
+// synced contacts. Cached briefly so we don't rescan on every call.
+let _nameIndex = null;
+let _nameIndexAt = 0;
+
+function buildNameIndex() {
+  const idx = new Map();
+  const put = (jid, name) => {
+    if (!jid || !name) return;
+    if (!idx.has(jid)) idx.set(jid, name);
+    // Also index by bare number so "@123..." text mentions resolve.
+    const num = jidToReadable(jid);
+    if (num && !idx.has(num)) idx.set(num, name);
+  };
+  // Contacts (agenda) take priority — set them first.
+  for (const [id, c] of store.contacts.entries()) {
+    put(id, c?.name || c?.verifiedName || c?.notify);
+  }
+  // Then pushNames seen in messages.
+  for (const msgs of store.messages.values()) {
+    for (const msg of msgs) {
+      if (msg.key?.fromMe) continue;
+      const sender = msg.key?.participant || msg.key?.remoteJid;
+      if (sender && msg.pushName) put(sender, msg.pushName);
+    }
+  }
+  return idx;
+}
+
+function nameIndex() {
+  const now = Date.now();
+  if (!_nameIndex || now - _nameIndexAt > 60000) {
+    _nameIndex = buildNameIndex();
+    _nameIndexAt = now;
+  }
+  return _nameIndex;
+}
+
+/** Best human-readable name for any participant/sender JID. */
+export function resolveJidName(jid) {
+  if (!jid) return null;
+  const idx = nameIndex();
+  return idx.get(jid) || idx.get(jidToReadable(jid)) || store.resolveName(jid) || null;
+}
+
+// Replace "@<number>" mentions inside message text with "@<name>" when known.
+function resolveMentionsInText(text) {
+  if (!text || text.indexOf('@') === -1) return text;
+  const idx = nameIndex();
+  return text.replace(/@(\d{5,})/g, (full, num) => {
+    const name = idx.get(num) || idx.get(num + '@s.whatsapp.net') || idx.get(num + '@lid');
+    return name ? '@' + name : full;
+  });
+}
+
 /**
  * Determine chat type label.
  */
@@ -387,6 +443,7 @@ export async function getAllChats(sock, options = {}) {
           participants = (meta.participants || []).map((p) => ({
             jid: p.id,
             number: jidToReadable(p.id),
+            name: resolveJidName(p.id) || null,
             isAdmin: p.admin != null,
           }));
         }
@@ -395,7 +452,7 @@ export async function getAllChats(sock, options = {}) {
       }
     }
 
-    const lastMsgText = extractMessageText(lastMsg?.message);
+    const lastMsgText = resolveMentionsInText(extractMessageText(lastMsg?.message));
     const timestamp = lastTs ? new Date(lastTs) : null;
 
     chats.push({
@@ -520,25 +577,78 @@ export function getChatPhone(jid) {
 /**
  * Send a text message to a chat via the active socket.
  */
-export async function sendTextMessage(jid, text, mentions = []) {
+export async function sendTextMessage(jid, text, mentions = [], quotedId = null) {
   const sock = getSocket();
   if (!sock) throw new Error('WhatsApp não conectado');
   const content = mentions && mentions.length > 0 ? { text, mentions } : { text };
+  const options = {};
+  if (quotedId) {
+    const quoted = getRawMessage(jid, quotedId);
+    if (quoted) options.quoted = quoted;
+  }
+  await sock.sendMessage(jid, content, options);
+}
+
+/** Forward a stored message to another chat. */
+export async function forwardMessage(srcJid, msgId, destJid) {
+  const sock = getSocket();
+  if (!sock) throw new Error('WhatsApp não conectado');
+  const original = getRawMessage(srcJid, msgId);
+  if (!original) throw new Error('Mensagem original não encontrada');
+  await sock.sendMessage(destJid, { forward: original });
+}
+
+/**
+ * Send a media message (image / video / audio / document) from a base64 payload.
+ * @param {string} jid
+ * @param {{ base64: string, mimetype: string, kind: string, filename?: string, caption?: string, ptt?: boolean }} media
+ */
+export async function sendMediaMessage(jid, media) {
+  const sock = getSocket();
+  if (!sock) throw new Error('WhatsApp não conectado');
+  const { base64, mimetype, kind, filename, caption, ptt } = media;
+  if (!base64) throw new Error('Arquivo vazio');
+  const buffer = Buffer.from(base64, 'base64');
+
+  let content;
+  if (kind === 'image') {
+    content = { image: buffer, mimetype: mimetype || 'image/jpeg', caption: caption || undefined };
+  } else if (kind === 'video') {
+    content = { video: buffer, mimetype: mimetype || 'video/mp4', caption: caption || undefined };
+  } else if (kind === 'audio') {
+    content = { audio: buffer, mimetype: mimetype || 'audio/mp4', ptt: ptt !== false };
+  } else {
+    content = {
+      document: buffer,
+      mimetype: mimetype || 'application/octet-stream',
+      fileName: filename || 'arquivo',
+      caption: caption || undefined,
+    };
+  }
   await sock.sendMessage(jid, content);
 }
 
 function formatMessages(messages, jid) {
-  return messages.map((msg) => ({
-    id: msg.key?.id,
-    fromMe: msg.key?.fromMe || false,
-    sender: msg.key?.participant || msg.key?.remoteJid || jid,
-    senderName: msg.pushName || jidToReadable(msg.key?.participant || msg.key?.remoteJid || jid),
-    text: extractMessageText(msg.message),
-    timestamp: msg.messageTimestamp
-      ? new Date(Number(msg.messageTimestamp) * 1000)
-      : null,
-    type: getMessageType(msg.message),
-  })).filter((m) => m.text || m.type !== 'unknown');
+  return messages.map((msg) => {
+    const senderJid = msg.key?.participant || msg.key?.remoteJid || jid;
+    return {
+      id: msg.key?.id,
+      fromMe: msg.key?.fromMe || false,
+      sender: senderJid,
+      senderName: resolveJidName(senderJid) || msg.pushName || jidToReadable(senderJid),
+      text: resolveMentionsInText(extractMessageText(msg.message)),
+      timestamp: msg.messageTimestamp
+        ? new Date(Number(msg.messageTimestamp) * 1000)
+        : null,
+      type: getMessageType(msg.message),
+    };
+  }).filter((m) => m.text || m.type !== 'unknown');
+}
+
+/** Look up the raw stored message object by chat + message id (for reply/forward). */
+export function getRawMessage(jid, id) {
+  const msgs = store.messages.get(jid) || [];
+  return msgs.find((m) => m.key?.id === id) || null;
 }
 
 /**

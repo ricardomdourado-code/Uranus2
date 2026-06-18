@@ -506,6 +506,58 @@
   .msg .msg-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; text-align: right; }
   .msg.them { align-self: flex-start; background: #243044; }
   .msg.me { align-self: flex-end; background: rgba(59,130,246,0.22); }
+  .msg-actions { display: flex; gap: 6px; margin-top: 4px; }
+  .msg-act-btn {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 11px; cursor: pointer; padding: 0; opacity: 0.7;
+  }
+  .msg-act-btn:hover { color: var(--accent); opacity: 1; }
+
+  /* Reply-to / forward context indicator above the textarea */
+  .reply-context {
+    display: none;
+    align-items: center; gap: 8px;
+    background: var(--surface2);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 6px 10px; margin-bottom: 8px;
+    font-size: 12px; color: #93c5fd;
+  }
+  .reply-context.visible { display: flex; }
+  .reply-context .rc-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reply-context .rc-close { cursor: pointer; color: var(--text-muted); font-weight: 700; }
+  .reply-context .rc-close:hover { color: var(--critica); }
+
+  /* Attachment toolbar */
+  .attach-bar { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+  .attach-btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px;
+  }
+  .attach-btn:hover { border-color: var(--accent); }
+  .attach-btn.recording { background: rgba(239,68,68,0.2); border-color: var(--critica); color: #fca5a5; }
+  .attach-preview { font-size: 12px; color: var(--baixa); margin-left: 4px; }
+
+  /* Forward destination modal */
+  .fwd-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 1100; align-items: center; justify-content: center; padding: 20px;
+  }
+  .fwd-overlay.open { display: flex; }
+  .fwd-box {
+    background: #1a2233; border: 1px solid var(--border); border-radius: 12px;
+    width: 100%; max-width: 480px; max-height: 80vh; display: flex; flex-direction: column;
+  }
+  .fwd-box h3 { padding: 14px 16px; border-bottom: 1px solid var(--border); font-size: 15px; }
+  .fwd-search { margin: 10px 16px; padding: 8px 10px; border-radius: 8px;
+    background: #0f1626; border: 1px solid var(--border); color: var(--text); font-size: 13px; }
+  .fwd-list { overflow-y: auto; padding: 0 8px 12px; }
+  .fwd-item {
+    padding: 9px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  .fwd-item:hover { background: var(--surface2); }
+  .fwd-item .fwd-type { font-size: 11px; color: var(--text-muted); }
   .modal-reply { padding: 14px 18px; border-top: 1px solid var(--border); }
   .reply-label { font-size: 12px; font-weight: 700; color: var(--text-muted); }
   .reply-textarea {
@@ -769,10 +821,20 @@
     <div id="modal-summary-box" class="modal-summary-box" style="display:none;"></div>
     <div class="modal-messages" id="modal-messages">Carregando mensagens...</div>
     <div class="modal-reply">
+      <div class="reply-context" id="reply-context">
+        <span class="rc-text" id="reply-context-text"></span>
+        <span class="rc-close" onclick="clearReplyContext()">✕</span>
+      </div>
       <label class="reply-label">Sua resposta</label>
       <textarea id="modal-reply-text" class="reply-textarea" rows="4" placeholder="Escreva ou gere uma resposta com IA..."></textarea>
       <div id="mention-picker" class="mention-picker" title="Clique para marcar participantes na mensagem"></div>
       <input id="modal-reply-instruction" class="reply-instruction" placeholder="(Opcional) Instrução para a IA: ex. 'seja mais formal', 'peça o prazo'" />
+      <div class="attach-bar">
+        <button class="attach-btn" onclick="document.getElementById('file-input').click()" title="Anexar arquivo ou foto">📎 Anexar</button>
+        <button class="attach-btn" id="rec-btn" onclick="toggleRecording()" title="Gravar áudio">🎤 Gravar áudio</button>
+        <span class="attach-preview" id="attach-preview"></span>
+        <input type="file" id="file-input" style="display:none" onchange="onFileSelected(event)" />
+      </div>
       <div class="modal-actions">
         <button class="btn" id="modal-summary-btn" onclick="summarizeChat()">🧠 Resumir conversa</button>
         <button class="btn" id="modal-ai-btn" onclick="generateReply()">✨ Gerar resposta</button>
@@ -781,6 +843,15 @@
       </div>
       <div class="modal-hint" id="modal-hint"></div>
     </div>
+  </div>
+</div>
+
+<!-- FORWARD DESTINATION PICKER -->
+<div class="fwd-overlay" id="fwd-overlay" onclick="if(event.target===this)closeForward()">
+  <div class="fwd-box">
+    <h3>↪ Encaminhar para…</h3>
+    <input type="text" class="fwd-search" id="fwd-search" placeholder="Buscar conversa..." oninput="renderForwardList()">
+    <div class="fwd-list" id="fwd-list"></div>
   </div>
 </div>
 
@@ -795,6 +866,12 @@ let ignoredSet = new Set();
 let charts = {};
 let mentionFilterActive = false;
 let selectedMentions = []; // JIDs of participants to @mention in current reply
+let modalMessages = [];    // messages currently shown in the modal
+let replyToId = null;      // message id being quoted in the reply
+let forwardSrcId = null;   // message id being forwarded
+let pendingMedia = null;   // { base64, mimetype, kind, filename }
+let mediaRecorder = null;
+let recordedChunks = [];
 
 // ============================================================
 // HELPERS
@@ -1185,6 +1262,8 @@ async function openChatModal(jid) {
   document.getElementById('mention-picker').innerHTML = '';
   document.getElementById('mention-picker').classList.remove('visible');
   selectedMentions = [];
+  clearReplyContext();
+  clearAttachment();
 
   try {
     const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
@@ -1220,6 +1299,7 @@ async function openChatModal(jid) {
     }
 
     const msgs = d.messages || [];
+    modalMessages = msgs;
     const box = document.getElementById('modal-messages');
     if (msgs.length === 0) {
       box.innerHTML = '<div style="color:var(--text-muted);text-align:center;margin-top:40px;">Nenhuma mensagem encontrada para esta conversa.</div>';
@@ -1229,6 +1309,10 @@ async function openChatModal(jid) {
           ${m.fromMe ? '' : `<div class="msg-sender">${escHtml(m.senderName || '')}</div>`}
           <div>${escHtml(m.text || '')}</div>
           <div class="msg-time">${fmtTime(m.timestamp)}</div>
+          ${m.id ? `<div class="msg-actions">
+            <button class="msg-act-btn" onclick="setReplyTo('${m.id}')">↩ Responder</button>
+            <button class="msg-act-btn" onclick="startForward('${m.id}')">↪ Encaminhar</button>
+          </div>` : ''}
         </div>`).join('');
       box.scrollTop = box.scrollHeight;
     }
@@ -1281,6 +1365,145 @@ function toggleMentionChip(el, jid, name) {
 
 function closeChatModal() {
   document.getElementById('chat-modal').classList.remove('open');
+  if (mediaRecorder && mediaRecorder.state === 'recording') { try { mediaRecorder.stop(); } catch(e){} }
+}
+
+// ---- Reply to a specific message (quote) ----
+function setReplyTo(id) {
+  const m = modalMessages.find(x => x.id === id);
+  if (!m) return;
+  replyToId = id;
+  const ctx = document.getElementById('reply-context');
+  document.getElementById('reply-context-text').innerHTML =
+    '↩ Respondendo <strong>' + escHtml(m.senderName || (m.fromMe ? 'Você' : '')) + '</strong>: ' +
+    escHtml((m.text || '').slice(0, 60));
+  ctx.classList.add('visible');
+  document.getElementById('modal-reply-text').focus();
+}
+
+function clearReplyContext() {
+  replyToId = null;
+  const ctx = document.getElementById('reply-context');
+  if (ctx) { ctx.classList.remove('visible'); document.getElementById('reply-context-text').innerHTML = ''; }
+}
+
+// ---- Forward a specific message ----
+async function startForward(id) {
+  forwardSrcId = id;
+  document.getElementById('fwd-search').value = '';
+  await ensureChatsLoaded();
+  renderForwardList();
+  document.getElementById('fwd-overlay').classList.add('open');
+}
+
+function closeForward() {
+  document.getElementById('fwd-overlay').classList.remove('open');
+  forwardSrcId = null;
+}
+
+let allChatsCache = null;
+async function ensureChatsLoaded() {
+  try {
+    const r = await fetch('/api/chats');
+    const d = await r.json();
+    allChatsCache = d.chats || [];
+  } catch(e) { allChatsCache = (reportData.chats || []).map(c => ({ jid: c.jid, name: c.name, type: c.type })); }
+}
+
+function renderForwardList() {
+  const q = normalize(document.getElementById('fwd-search').value);
+  const list = document.getElementById('fwd-list');
+  const chats = (allChatsCache || []).filter(c => !q || normalize(c.name).includes(q));
+  if (!chats.length) { list.innerHTML = '<div class="empty-col">Nenhuma conversa</div>'; return; }
+  list.innerHTML = chats.slice(0, 50).map(c =>
+    `<div class="fwd-item" onclick="doForward('${c.jid}')">
+       <span>${escHtml(c.name)}</span>
+       <span class="fwd-type">${escHtml(c.type || '')}</span>
+     </div>`).join('');
+}
+
+async function doForward(destJid) {
+  if (!forwardSrcId || !modalChat.jid) return;
+  try {
+    const r = await fetch('/api/forward', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ srcJid: modalChat.jid, msgId: forwardSrcId, destJid }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'falhou');
+    showToast('↪ Mensagem encaminhada');
+    closeForward();
+  } catch(e) {
+    showToast('Erro ao encaminhar: ' + e.message, 'critical');
+  }
+}
+
+// ---- Attachments: file/photo + audio recording ----
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function kindFromMime(mime) {
+  if (!mime) return 'document';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'document';
+}
+
+async function onFileSelected(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  try {
+    const base64 = await fileToBase64(file);
+    pendingMedia = { base64, mimetype: file.type, kind: kindFromMime(file.type), filename: file.name };
+    document.getElementById('attach-preview').textContent = '📎 ' + file.name + ' (pronto p/ enviar)';
+  } catch(e) { showToast('Erro ao ler arquivo'); }
+  ev.target.value = '';
+}
+
+function clearAttachment() {
+  pendingMedia = null;
+  const p = document.getElementById('attach-preview');
+  if (p) p.textContent = '';
+}
+
+async function toggleRecording() {
+  const btn = document.getElementById('rec-btn');
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast('Gravação de áudio não suportada neste navegador', 'critical'); return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      btn.classList.remove('recording');
+      btn.textContent = '🎤 Gravar áudio';
+      const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+      const base64 = await new Promise((res) => {
+        const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob);
+      });
+      pendingMedia = { base64, mimetype: 'audio/webm', kind: 'audio', filename: 'audio.webm', ptt: true };
+      document.getElementById('attach-preview').textContent = '🎤 Áudio gravado (pronto p/ enviar)';
+    };
+    mediaRecorder.start();
+    btn.classList.add('recording');
+    btn.textContent = '⏹ Parar gravação';
+  } catch(e) {
+    showToast('Não foi possível acessar o microfone', 'critical');
+  }
 }
 
 async function generateReply() {
@@ -1313,7 +1536,7 @@ function copyReply(btn) {
 
 async function sendReply() {
   const text = document.getElementById('modal-reply-text').value.trim();
-  if (!text) { showToast('Escreva uma resposta primeiro'); return; }
+  if (!text && !pendingMedia) { showToast('Escreva uma resposta ou anexe um arquivo'); return; }
   const btn = document.getElementById('modal-send-btn');
   const hint = document.getElementById('modal-hint');
 
@@ -1321,29 +1544,54 @@ async function sendReply() {
   btn.textContent = '⏳ Enviando...';
 
   try {
-    const r = await fetch('/api/send/' + encodeURIComponent(modalChat.jid), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, mentions: selectedMentions.length ? selectedMentions : undefined }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Erro ao enviar');
+    // 1) Send media first (with the text as caption when applicable)
+    if (pendingMedia) {
+      const caption = pendingMedia.kind === 'audio' ? undefined : (text || undefined);
+      const mr = await fetch('/api/send-media/' + encodeURIComponent(modalChat.jid), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...pendingMedia, caption }),
+      });
+      const md = await mr.json();
+      if (!mr.ok) throw new Error(md.error || 'Erro ao enviar mídia');
+      // If text was used as caption (non-audio), don't resend it as a separate message.
+      if (pendingMedia.kind !== 'audio') {
+        finishSend(btn, hint); return;
+      }
+    }
 
-    hint.textContent = '✅ Mensagem enviada com sucesso!';
-    btn.textContent = '✅ Enviado';
-    document.getElementById('modal-reply-text').value = '';
-    selectedMentions = [];
-    document.querySelectorAll('.mention-chip.selected').forEach(el => el.classList.remove('selected'));
+    // 2) Send text (optionally quoting a specific message / mentioning people)
+    if (text) {
+      const r = await fetch('/api/send/' + encodeURIComponent(modalChat.jid), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          mentions: selectedMentions.length ? selectedMentions : undefined,
+          quotedId: replyToId || undefined,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro ao enviar');
+    }
 
-    // Move to "Respondidas"
-    await markReplied(modalChat.jid);
-
-    setTimeout(() => closeChatModal(), 1500);
+    finishSend(btn, hint);
   } catch (err) {
     hint.textContent = '❌ Falha no envio: ' + err.message;
     btn.disabled = false;
     btn.textContent = '📤 Enviar no WhatsApp';
   }
+}
+
+async function finishSend(btn, hint) {
+  hint.textContent = '✅ Mensagem enviada com sucesso!';
+  btn.textContent = '✅ Enviado';
+  document.getElementById('modal-reply-text').value = '';
+  selectedMentions = [];
+  document.querySelectorAll('.mention-chip.selected').forEach(el => el.classList.remove('selected'));
+  clearReplyContext();
+  clearAttachment();
+  await markReplied(modalChat.jid);
+  setTimeout(() => closeChatModal(), 1500);
 }
 
 async function markReplied(jid) {

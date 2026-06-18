@@ -8,12 +8,13 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
 import { saveGroups, saveDelegates, saveIgnored, saveResolved } from './state.js';
-import { getRecentMessages, getChatPhone, sendTextMessage, storeEvents } from './whatsapp.js';
+import { getRecentMessages, getChatPhone, sendTextMessage, forwardMessage, sendMediaMessage, storeEvents } from './whatsapp.js';
 import OpenAI from 'openai';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Larger limit so base64 media uploads (photos/audio/files) fit in the body.
+app.use(express.json({ limit: '60mb' }));
 // Never cache HTML so dashboard updates always reach the browser immediately.
 app.use((req, res, next) => {
   if (req.path === '/' || req.path.endsWith('.html')) {
@@ -344,15 +345,52 @@ Responda APENAS com o texto da mensagem, sem aspas e sem comentários.`;
 // POST /api/send/:jid — send a message directly via WhatsApp (for groups/LID)
 app.post('/api/send/:jid', async (req, res) => {
   const jid = decodeURIComponent(req.params.jid);
-  const { text, mentions } = req.body || {};
+  const { text, mentions, quotedId } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'text required' });
   try {
-    await sendTextMessage(jid, text.trim(), mentions || []);
+    await sendTextMessage(jid, text.trim(), mentions || [], quotedId || null);
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err, jid }, 'Erro ao enviar mensagem');
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /api/forward — forward a stored message to another chat
+app.post('/api/forward', async (req, res) => {
+  const { srcJid, msgId, destJid } = req.body || {};
+  if (!srcJid || !msgId || !destJid) {
+    return res.status(400).json({ error: 'srcJid, msgId and destJid required' });
+  }
+  try {
+    await forwardMessage(srcJid, msgId, destJid);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, srcJid, destJid }, 'Erro ao encaminhar mensagem');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/send-media/:jid — send an image/video/audio/document (base64 payload)
+app.post('/api/send-media/:jid', async (req, res) => {
+  const jid = decodeURIComponent(req.params.jid);
+  const { base64, mimetype, kind, filename, caption, ptt } = req.body || {};
+  if (!base64) return res.status(400).json({ error: 'base64 required' });
+  try {
+    await sendMediaMessage(jid, { base64, mimetype, kind, filename, caption, ptt });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, jid }, 'Erro ao enviar mídia');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/chats — lightweight list of known chats (for the forward picker)
+app.get('/api/chats', (req, res) => {
+  const chats = (state.analyzedChats || []).map((c) => ({
+    jid: c.jid, name: c.name, type: c.type,
+  }));
+  res.json({ chats });
 });
 
 // Generate email
