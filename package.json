@@ -5,7 +5,8 @@
   "description": "Automação WhatsApp - Uranus2",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --watch src/index.js",
+    "start:once": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
