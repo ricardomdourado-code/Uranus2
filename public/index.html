@@ -119,7 +119,7 @@
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   /* TAB PANES */
-  .tab-pane { display: none; padding: 20px; }
+  .tab-pane { display: none; padding: 16px 12px; }
   .tab-pane.active { display: block; }
 
   /* FILTER BAR */
@@ -164,25 +164,47 @@
     user-select: none;
   }
 
-  /* PRIORITY COLUMNS */
+  /* PRIORITY COLUMNS — full-viewport Kanban */
   .priority-grid {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 16px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
     align-items: start;
+    /* each column scrolls independently; grid itself does not scroll horizontally */
   }
 
-  @media (max-width: 1600px) {
-    .priority-grid { grid-template-columns: repeat(3, 1fr); }
+  .priority-col {
+    min-width: 0;                /* prevent blowout */
+    max-height: calc(100vh - 130px);
+    display: flex;
+    flex-direction: column;
   }
-  @media (max-width: 1100px) {
+
+  /* Column header sticks at the top while cards scroll */
+  .priority-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    flex-shrink: 0;
+  }
+
+  /* Scrollable card list */
+  .priority-col > div:last-child {
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 8px;
+  }
+
+  @media (max-width: 1400px) {
+    .priority-grid { grid-template-columns: repeat(3, 1fr); }
+    .priority-col { max-height: none; }
+  }
+  @media (max-width: 900px) {
     .priority-grid { grid-template-columns: repeat(2, 1fr); }
   }
-  @media (max-width: 640px) {
+  @media (max-width: 540px) {
     .priority-grid { grid-template-columns: 1fr; }
   }
-
-  .priority-col {}
 
   .priority-header {
     display: flex;
@@ -216,8 +238,8 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 14px;
-    margin-bottom: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
     transition: opacity 0.3s, border-color 0.2s;
   }
   .card:hover { border-color: #475569; }
@@ -226,15 +248,20 @@
   .card-top {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 6px;
+    margin-bottom: 5px;
+    flex-wrap: wrap;
   }
 
   .card-name {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13px;
     flex: 1;
     line-height: 1.3;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .badge {
@@ -932,16 +959,18 @@ let modalChat = { jid: null, phone: null, type: null, name: null };
 
 async function openChatModal(jid) {
   const overlay = document.getElementById('chat-modal');
+  if (!overlay) { showToast('Erro: modal não encontrado. Recarregue a página (Cmd+Shift+R).', 'critical'); return; }
   overlay.classList.add('open');
   document.getElementById('modal-title').textContent = 'Carregando...';
   document.getElementById('modal-sub').textContent = '';
-  document.getElementById('modal-messages').innerHTML = 'Carregando mensagens...';
+  document.getElementById('modal-messages').innerHTML = '<div style="color:var(--text-muted);text-align:center;margin-top:40px;">⏳ Buscando mensagens...</div>';
   document.getElementById('modal-reply-text').value = '';
   document.getElementById('modal-reply-instruction').value = '';
   document.getElementById('modal-hint').textContent = '';
 
   try {
     const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     modalChat = { jid: d.jid, phone: d.phone, type: d.type, name: d.name };
 
