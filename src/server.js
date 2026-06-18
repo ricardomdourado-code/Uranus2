@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
 import { saveGroups, saveDelegates, saveIgnored, saveResolved } from './state.js';
-import { getRecentMessages, getChatPhone, sendTextMessage, forwardMessage, sendMediaMessage, markChatRead, storeEvents } from './whatsapp.js';
+import { getRecentMessages, getChatPhone, sendTextMessage, forwardMessage, sendMediaMessage, markChatRead, getLidNames, setContactName, storeEvents } from './whatsapp.js';
 import OpenAI from 'openai';
 
 const app = express();
@@ -410,6 +410,22 @@ app.get('/api/chats', (req, res) => {
     jid: c.jid, name: c.name, type: c.type,
   }));
   res.json({ chats });
+});
+
+// GET /api/contacts/lids — list all @lid entries with their resolved (or unresolved) info
+app.get('/api/contacts/lids', (req, res) => {
+  res.json({ lids: getLidNames() });
+});
+
+// POST /api/contacts/rename — manually set/override a name for any JID (handles @lid)
+app.post('/api/contacts/rename', (req, res) => {
+  const { jid, name } = req.body || {};
+  if (!jid || !name || !name.trim()) return res.status(400).json({ error: 'jid and name required' });
+  setContactName(jid, name.trim());
+  // Update in-memory report so the next render picks it up
+  const chat = state.analyzedChats.find((c) => c.jid === jid);
+  if (chat) chat.name = name.trim();
+  res.json({ ok: true, jid, name: name.trim() });
 });
 
 // Generate email

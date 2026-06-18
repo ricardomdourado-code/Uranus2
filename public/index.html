@@ -265,6 +265,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .rename-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 12px; padding: 0 2px; opacity: 0.6; flex-shrink: 0;
+  }
+  .rename-btn:hover { opacity: 1; color: var(--accent); }
 
   .badge {
     font-size: 10px;
@@ -1204,8 +1209,9 @@ function cardHtml(c) {
 
   return `
     <div class="card ${resolved ? 'resolved' : ''}" id="card-${jidEnc}">
-      <div class="card-top card-clickable" onclick="openChatModal('${c.jid}')" title="Ver conversa e responder">
-        <div class="card-name">${escHtml(c.name)}</div>
+      <div class="card-top">
+        <div class="card-name card-clickable" onclick="openChatModal('${c.jid}')" title="Ver conversa e responder">${escHtml(c.name)}</div>
+        <button class="rename-btn" onclick="promptRename('${c.jid}','${c.name.replace(/'/g,"\\'")}',this)" title="Renomear contato">✏️</button>
         <span class="badge ${typeBadge}">${typeLabel}</span>
         ${c.unreadCount ? `<span class="badge badge-unread">${c.unreadCount}</span>` : ''}
         ${c.mentionedOwner ? '<span class="badge badge-mention" title="Mencionou você">@você</span>' : ''}
@@ -1227,6 +1233,25 @@ function cardHtml(c) {
       </div>
     </div>
   `;
+}
+
+async function promptRename(jid, currentName, btn) {
+  const newName = window.prompt('Novo nome para o contato/conversa:', currentName);
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  try {
+    const r = await fetch('/api/contacts/rename', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid, name: newName.trim() }),
+    });
+    if (!r.ok) throw new Error('falhou');
+    // Update local report data immediately
+    const c = (reportData.chats || []).find(x => x.jid === jid);
+    if (c) c.name = newName.trim();
+    renderPriorities();
+    showToast('✏️ Nome atualizado: ' + newName.trim());
+  } catch(e) {
+    showToast('Erro ao renomear', 'critical');
+  }
 }
 
 async function toggleIgnore(jid) {

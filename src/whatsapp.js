@@ -29,6 +29,8 @@ const store = {
   chats: new Map(),
   messages: new Map(),
   contacts: new Map(), // jid -> { name, notify, verifiedName }
+  // lid -> { name, phone, linkedJid } — persisted separately, enriched over time
+  lidNames: new Map(),
 
   /** Load persisted chats/messages from disk into memory (called on startup). */
   load() {
@@ -44,8 +46,11 @@ const store = {
       for (const [id, contact] of Object.entries(raw.contacts || {})) {
         this.contacts.set(id, contact);
       }
+      for (const [lid, info] of Object.entries(raw.lidNames || {})) {
+        this.lidNames.set(lid, info);
+      }
       const totalMsgs = [...this.messages.values()].reduce((s, a) => s + a.length, 0);
-      logger.info(`💾 Histórico carregado do disco: ${this.chats.size} conversas, ${totalMsgs} mensagens.`);
+      logger.info(`💾 Histórico carregado do disco: ${this.chats.size} conversas, ${totalMsgs} mensagens, ${this.lidNames.size} LIDs resolvidos.`);
     } catch (err) {
       logger.warn({ err }, 'Não foi possível carregar o histórico salvo (começando vazio).');
     }
@@ -70,7 +75,9 @@ const store = {
       }
       const contacts = {};
       for (const [id, contact] of this.contacts.entries()) contacts[id] = contact;
-      writeFileSync(STORE_FILE, JSON.stringify({ chats, messages, contacts }));
+      const lidNames = {};
+      for (const [lid, info] of this.lidNames.entries()) lidNames[lid] = info;
+      writeFileSync(STORE_FILE, JSON.stringify({ chats, messages, contacts, lidNames }));
     } catch (err) {
       logger.warn({ err }, 'Falha ao salvar histórico no disco.');
     }
@@ -99,6 +106,14 @@ const store = {
         if (!msg.key?.fromMe) {
           const chat = this.chats.get(jid);
           chat.unreadCount = (chat.unreadCount || 0) + 1;
+          // Persist pushName for @lid JIDs found in history
+          const senderJid = msg.key?.participant || jid;
+          if (senderJid && senderJid.endsWith('@lid') && msg.pushName) {
+            this.recordLidPushName(senderJid, msg.pushName);
+          }
+          if (jid.endsWith('@lid') && msg.pushName) {
+            this.recordLidPushName(jid, msg.pushName);
+          }
         }
       }
       const totalChats = this.chats.size;
@@ -146,6 +161,15 @@ const store = {
         }
         if (!msg.key?.fromMe) {
           chat.unreadCount = (chat.unreadCount || 0) + 1;
+          // For @lid senders, persist their pushName so they resolve by name.
+          const senderJid = msg.key?.participant || jid;
+          if (senderJid && senderJid.endsWith('@lid') && msg.pushName) {
+            store.recordLidPushName(senderJid, msg.pushName);
+          }
+          // Same for individual @lid chats
+          if (jid.endsWith('@lid') && msg.pushName) {
+            store.recordLidPushName(jid, msg.pushName);
+          }
         }
 
         // Real-time: notify listeners so the dashboard updates instantly,
@@ -164,27 +188,66 @@ const store = {
     });
     ev.on('contacts.set', ({ contacts }) => {
       for (const c of (contacts || [])) {
-        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName });
+        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName, lid: c.lid });
+        // If a contact entry has a .lid field, register it in lidNames too.
+        if (c.lid) {
+          const existing = this.lidNames.get(c.lid) || {};
+          this.lidNames.set(c.lid, { ...existing, name: c.name || c.notify || existing.name, linkedJid: c.id });
+        }
+        // If this IS a @lid entry and has a name, store it
+        if (c.id && c.id.endsWith('@lid') && (c.name || c.notify)) {
+          const existing = this.lidNames.get(c.id) || {};
+          this.lidNames.set(c.id, { ...existing, name: c.name || c.notify || c.verifiedName || existing.name });
+        }
       }
     });
     ev.on('contacts.upsert', (contacts) => {
       for (const c of (contacts || [])) {
-        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName });
+        this.contacts.set(c.id, { name: c.name, notify: c.notify, verifiedName: c.verifiedName, lid: c.lid });
+        if (c.lid) {
+          const existing = this.lidNames.get(c.lid) || {};
+          this.lidNames.set(c.lid, { ...existing, name: c.name || c.notify || existing.name, linkedJid: c.id });
+        }
+        if (c.id && c.id.endsWith('@lid') && (c.name || c.notify)) {
+          const existing = this.lidNames.get(c.id) || {};
+          this.lidNames.set(c.id, { ...existing, name: c.name || c.notify || c.verifiedName || existing.name });
+        }
       }
     });
     ev.on('contacts.update', (updates) => {
       for (const u of (updates || [])) {
         const existing = this.contacts.get(u.id) || {};
         this.contacts.set(u.id, { ...existing, ...u });
+        if (u.lid) {
+          const ex2 = this.lidNames.get(u.lid) || {};
+          this.lidNames.set(u.lid, { ...ex2, name: u.name || u.notify || ex2.name, linkedJid: u.id });
+        }
       }
     });
   },
 
   /** Best human-readable name for a JID: contact > stored chat name > number. */
   resolveName(jid) {
+    // Direct contact lookup
     const c = this.contacts.get(jid);
     if (c) return c.name || c.verifiedName || c.notify || null;
+    // @lid fallback
+    if (jid && jid.endsWith('@lid')) {
+      const lid = this.lidNames.get(jid);
+      return lid?.name || null;
+    }
     return null;
+  },
+
+  /** Record a pushName seen in a message for a @lid JID. */
+  recordLidPushName(lid, pushName) {
+    if (!lid || !lid.endsWith('@lid') || !pushName) return;
+    const existing = this.lidNames.get(lid);
+    // Only update if we don't already have a better (contact-sourced) name
+    if (!existing || !existing.name) {
+      this.lidNames.set(lid, { ...existing, name: pushName });
+      _nameIndex = null; // invalidate cache
+    }
   },
 };
 
@@ -233,6 +296,8 @@ export async function connectToWhatsApp() {
           resolved = true;
           logger.info('WhatsApp conectado com sucesso! Aguardando sincronização do histórico...');
           resolve(sock);
+          // After 60s (enough for initial sync), try to resolve unknown @lid names
+          setTimeout(() => resolveUnknownLids(sock).catch(() => {}), 60000);
         } else {
           logger.info('WhatsApp reconectado.');
         }
@@ -318,11 +383,20 @@ function buildNameIndex() {
     const num = jidToReadable(jid);
     if (num && !idx.has(num)) idx.set(num, name);
   };
-  // Contacts (agenda) take priority — set them first.
-  for (const [id, c] of store.contacts.entries()) {
-    put(id, c?.name || c?.verifiedName || c?.notify);
+  // Layer 1: explicit LID name map (most resolved source)
+  for (const [lid, info] of store.lidNames.entries()) {
+    if (info?.name) put(lid, info.name);
+    // If we know the linked @s.whatsapp.net JID, index by that too
+    if (info?.linkedJid && info?.name) put(info.linkedJid, info.name);
   }
-  // Then pushNames seen in messages.
+  // Layer 2: synced contacts (agenda names)
+  for (const [id, c] of store.contacts.entries()) {
+    const name = c?.name || c?.verifiedName || c?.notify;
+    if (name) put(id, name);
+    // cross-link via .lid field
+    if (c?.lid && name) put(c.lid, name);
+  }
+  // Layer 3: pushNames seen in messages
   for (const msgs of store.messages.values()) {
     for (const msg of msgs) {
       if (msg.key?.fromMe) continue;
@@ -331,6 +405,55 @@ function buildNameIndex() {
     }
   }
   return idx;
+}
+
+/**
+ * Attempt to resolve any @lid JIDs that still lack a name using Baileys'
+ * internal USyncQuery. This is best-effort — runs after connection is stable.
+ * Called once from connectToWhatsApp after the socket opens.
+ */
+async function resolveUnknownLids(sock) {
+  const unresolved = [];
+  for (const [lid] of store.lidNames.entries()) {
+    const info = store.lidNames.get(lid);
+    if (!info?.name) unresolved.push(lid);
+  }
+  // Also find @lid JIDs that have no lidNames entry at all
+  for (const [jid] of store.chats.entries()) {
+    if (jid.endsWith('@lid') && !store.lidNames.has(jid)) unresolved.push(jid);
+  }
+  for (const msgs of store.messages.values()) {
+    for (const msg of msgs) {
+      const s = msg.key?.participant || msg.key?.remoteJid;
+      if (s && s.endsWith('@lid') && !store.lidNames.has(s)) unresolved.push(s);
+    }
+  }
+  const unique = [...new Set(unresolved)].slice(0, 50); // cap to avoid flooding
+  if (unique.length === 0) return;
+  logger.info(`🔍 Tentando resolver ${unique.length} LID(s) desconhecidos...`);
+  let resolved = 0;
+  for (const lid of unique) {
+    try {
+      // Baileys exposes sock.query for raw IQ — try business contact query
+      const result = await sock.onWhatsApp(lid).catch(() => null);
+      if (result && result[0]) {
+        const r = result[0];
+        const name = r.verifiedName || r.name || null;
+        const phone = r.jid ? jidToReadable(r.jid) : null;
+        const existing = store.lidNames.get(lid) || {};
+        store.lidNames.set(lid, { ...existing, name: name || existing.name, phone: phone || existing.phone, linkedJid: r.jid || existing.linkedJid });
+        if (name || phone) { resolved++; _nameIndex = null; }
+      }
+    } catch {
+      // silently skip unresolvable LIDs
+    }
+    // small delay to avoid rate-limiting
+    await new Promise(r => setTimeout(r, 200));
+  }
+  if (resolved > 0) {
+    logger.info(`✅ ${resolved} LID(s) resolvidos via USyncQuery`);
+    store.scheduleSave();
+  }
 }
 
 function nameIndex() {
@@ -602,6 +725,27 @@ export async function forwardMessage(srcJid, msgId, destJid) {
  * Mark a chat as read on WhatsApp: send read receipts for its recent incoming
  * messages and clear the local unread counter.
  */
+/** Returns the full LID name map as a plain object (for the admin panel). */
+export function getLidNames() {
+  const out = {};
+  for (const [lid, info] of store.lidNames.entries()) out[lid] = info;
+  return out;
+}
+
+/** Manually set (override) a name for a LID or any JID. */
+export function setContactName(jid, name) {
+  if (!jid) return;
+  if (jid.endsWith('@lid')) {
+    const existing = store.lidNames.get(jid) || {};
+    store.lidNames.set(jid, { ...existing, name });
+  } else {
+    const existing = store.contacts.get(jid) || {};
+    store.contacts.set(jid, { ...existing, name });
+  }
+  _nameIndex = null;
+  store.scheduleSave();
+}
+
 export async function markChatRead(jid) {
   const sock = getSocket();
   if (!sock) throw new Error('WhatsApp não conectado');
