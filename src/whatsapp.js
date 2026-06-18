@@ -147,6 +147,18 @@ const store = {
         if (!msg.key?.fromMe) {
           chat.unreadCount = (chat.unreadCount || 0) + 1;
         }
+
+        // Real-time: notify listeners so the dashboard updates instantly,
+        // before the next GPT cycle runs.
+        storeEvents.emit('message-activity', {
+          jid,
+          name: chat.name || store.resolveName(jid) || null,
+          fromMe: !!msg.key?.fromMe,
+          text: extractMessageText(msg.message),
+          unreadCount: chat.unreadCount || 0,
+          timestamp: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+          isGroup: jid.endsWith('@g.us'),
+        });
       }
       this.scheduleSave();
     });

@@ -616,7 +616,7 @@
 <!-- TAB: PRIORIDADES -->
 <div class="tab-pane active" id="tab-prioridades">
   <div class="filter-bar">
-    <input type="text" id="search-input" placeholder="Buscar por nome..." oninput="renderPriorities()">
+    <input type="text" id="search-input" placeholder="Buscar por nome, resumo ou mensagem..." oninput="renderPriorities()">
     <select id="type-filter" onchange="renderPriorities()">
       <option value="">Todos os tipos</option>
       <option value="Grupo">Grupo</option>
@@ -758,6 +758,10 @@ function initSSE() {
     showToast('Ciclo de análise concluído — dados atualizados');
   });
 
+  es.addEventListener('message-activity', (e) => {
+    try { applyMessageActivity(JSON.parse(e.data)); } catch (err) {}
+  });
+
   es.addEventListener('new-critical', (e) => {
     const data = JSON.parse(e.data);
     showToast('🚨 Nova mensagem CRÍTICA: ' + data.name, 'critical');
@@ -834,6 +838,35 @@ function applyReportData(data) {
   }
 }
 
+// Live update from an incoming WhatsApp message — refreshes the card instantly
+// (last message, time, unread) without waiting for the next GPT cycle.
+function applyMessageActivity(act) {
+  if (!act || !act.jid) return;
+  if (ignoredSet.has(act.jid)) return;
+  reportData.chats = reportData.chats || [];
+  let c = reportData.chats.find(x => x.jid === act.jid);
+  if (c) {
+    c.lastMessage = act.text || c.lastMessage;
+    c.lastMessageTime = act.timestamp;
+    c.unreadCount = act.unreadCount;
+  } else {
+    // New conversation not yet analyzed — show a placeholder card immediately.
+    reportData.chats.push({
+      jid: act.jid,
+      name: act.name || act.jid,
+      type: act.isGroup ? 'Grupo' : 'Contato',
+      priority: 'BAIXA',
+      priorityReason: 'Aguardando análise…',
+      summary: act.text || 'Nova mensagem recebida.',
+      lastMessage: act.text || '',
+      lastMessageTime: act.timestamp,
+      unreadCount: act.unreadCount || 1,
+      actionItems: [],
+    });
+  }
+  renderPriorities();
+}
+
 async function manualRefresh() {
   try {
     const r = await fetch('/api/report');
@@ -860,7 +893,11 @@ function renderPriorities() {
   const grid = document.getElementById('priority-grid');
 
   const chats = (reportData.chats || []).filter(c => {
-    if (search && !c.name.toLowerCase().includes(search)) return false;
+    if (search) {
+      const haystack = [c.name, c.summary, c.lastMessage, c.priorityReason]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
     if (typeFilter && c.type !== typeFilter) return false;
     if (hideResolved && resolvedSet.has(c.jid)) return false;
     return true;

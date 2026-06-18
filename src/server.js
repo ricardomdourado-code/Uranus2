@@ -8,7 +8,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { randomUUID } from 'crypto';
 import { saveGroups, saveDelegates, saveIgnored, saveResolved } from './state.js';
-import { getRecentMessages, getChatPhone, sendTextMessage } from './whatsapp.js';
+import { getRecentMessages, getChatPhone, sendTextMessage, storeEvents } from './whatsapp.js';
 import OpenAI from 'openai';
 
 const app = express();
@@ -352,6 +352,19 @@ app.get('/tv', (req, res) => {
 export function initServer(port = 3000) {
   app.listen(port, () => {
     logger.info(`Dashboard disponível em http://localhost:${port}`);
+  });
+
+  // Real-time: push live message activity to the dashboard, and keep the
+  // in-memory report's lastMessage/unread in sync so it doesn't get stale.
+  storeEvents.on('message-activity', (act) => {
+    if (state.ignoredJids.has(act.jid)) return; // hidden chats stay hidden
+    const existing = state.analyzedChats.find((c) => c.jid === act.jid);
+    if (existing) {
+      existing.lastMessage = act.text || existing.lastMessage;
+      existing.lastMessageTime = act.timestamp;
+      existing.unreadCount = act.unreadCount;
+    }
+    broadcast('message-activity', act);
   });
 }
 
