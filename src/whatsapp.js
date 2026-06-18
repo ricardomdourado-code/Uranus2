@@ -151,6 +151,26 @@ const store = {
         if (!jid) continue;
         if (!this.messages.has(jid)) this.messages.set(jid, []);
         const arr = this.messages.get(jid);
+
+        // Handle message deletions (revoke): WhatsApp sends a protocolMessage of
+        // type REVOKE (0) referencing the deleted message's key. Remove it from
+        // the store so the panel matches the original conversation.
+        const proto = msg.message?.protocolMessage;
+        if (proto && (proto.type === 0 || proto.type === 'REVOKE') && proto.key?.id) {
+          const targetJid = proto.key.remoteJid || jid;
+          const targetArr = this.messages.get(targetJid);
+          if (targetArr) {
+            const idx = targetArr.findIndex(m => m.key?.id === proto.key.id);
+            if (idx !== -1) targetArr.splice(idx, 1);
+          }
+          this.scheduleSave();
+          storeEvents.emit('message-activity', {
+            jid: targetJid, revoked: true, msgId: proto.key.id,
+            isGroup: targetJid.endsWith('@g.us'), timestamp: Date.now(),
+          });
+          continue; // don't store the protocol message itself
+        }
+
         if (!arr.find(m => m.key.id === msg.key.id)) arr.push(msg);
         if (arr.length > 500) arr.shift();
         // Track new incoming messages as unread on the chat entry
@@ -185,6 +205,32 @@ const store = {
         });
       }
       this.scheduleSave();
+    });
+    ev.on('messages.update', (updates) => {
+      let changed = false;
+      for (const u of (updates || [])) {
+        const jid = u.key?.remoteJid;
+        const id = u.key?.id;
+        if (!jid || !id) continue;
+        // A revoke delivered through messages.update: message becomes null or
+        // carries a REVOKE protocolMessage.
+        const proto = u.update?.message?.protocolMessage;
+        const isRevoke = u.update?.messageStubType === 1 // REVOKE stub
+          || (proto && (proto.type === 0 || proto.type === 'REVOKE'))
+          || u.update?.message === null;
+        if (isRevoke) {
+          const arr = this.messages.get(jid);
+          if (arr) {
+            const idx = arr.findIndex(m => m.key?.id === id);
+            if (idx !== -1) { arr.splice(idx, 1); changed = true; }
+          }
+          storeEvents.emit('message-activity', {
+            jid, revoked: true, msgId: id,
+            isGroup: jid.endsWith('@g.us'), timestamp: Date.now(),
+          });
+        }
+      }
+      if (changed) this.scheduleSave();
     });
     ev.on('contacts.set', ({ contacts }) => {
       for (const c of (contacts || [])) {

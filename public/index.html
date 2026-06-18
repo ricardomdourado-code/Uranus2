@@ -1036,6 +1036,17 @@ function toggleMentionFilter() {
 // (last message, time, unread) without waiting for the next GPT cycle.
 function applyMessageActivity(act) {
   if (!act || !act.jid) return;
+  // A message was deleted (revoked) in WhatsApp — drop it from the open modal
+  // so the panel matches the original conversation.
+  if (act.revoked) {
+    if (Array.isArray(modalMessages)) {
+      modalMessages = modalMessages.filter(m => m.id !== act.msgId);
+    }
+    if (modalChat && modalChat.jid === act.jid) {
+      renderModalMessages();
+    }
+    return;
+  }
   if (ignoredSet.has(act.jid)) return;
   reportData.chats = reportData.chats || [];
   let c = reportData.chats.find(x => x.jid === act.jid);
@@ -1296,7 +1307,7 @@ async function openChatModal(jid) {
   clearAttachment();
 
   try {
-    const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=30');
+    const r = await fetch('/api/messages/' + encodeURIComponent(jid) + '?limit=60');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     modalChat = { jid: d.jid, phone: d.phone, type: d.type, name: d.name, participants: d.participants || [] };
@@ -1328,28 +1339,33 @@ async function openChatModal(jid) {
       }
     }
 
-    const msgs = d.messages || [];
-    modalMessages = msgs;
-    const box = document.getElementById('modal-messages');
-    if (msgs.length === 0) {
-      box.innerHTML = '<div style="color:var(--text-muted);text-align:center;margin-top:40px;">Nenhuma mensagem encontrada para esta conversa.</div>';
-    } else {
-      box.innerHTML = msgs.map(m => `
-        <div class="msg ${m.fromMe ? 'me' : 'them'}">
-          ${m.fromMe ? '' : `<div class="msg-sender">${escHtml(m.senderName || '')}</div>`}
-          <div>${escHtml(m.text || '')}</div>
-          <div class="msg-time">${fmtTime(m.timestamp)}</div>
-          ${m.id ? `<div class="msg-actions">
-            <button class="msg-act-btn" onclick="setReplyTo('${m.id}')">↩ Responder</button>
-            <button class="msg-act-btn" onclick="startForward('${m.id}')">↪ Encaminhar</button>
-          </div>` : ''}
-        </div>`).join('');
-      box.scrollTop = box.scrollHeight;
-    }
+    modalMessages = d.messages || [];
+    renderModalMessages();
     // Item #7: do NOT pre-load a suggested reply — start with an empty box.
   } catch(e) {
     document.getElementById('modal-messages').innerHTML = '<div style="color:var(--critica)">Erro ao carregar a conversa.</div>';
   }
+}
+
+function renderModalMessages() {
+  const msgs = modalMessages || [];
+  const box = document.getElementById('modal-messages');
+  if (!box) return;
+  if (msgs.length === 0) {
+    box.innerHTML = '<div style="color:var(--text-muted);text-align:center;margin-top:40px;">Nenhuma mensagem encontrada para esta conversa.</div>';
+    return;
+  }
+  box.innerHTML = msgs.map(m => `
+    <div class="msg ${m.fromMe ? 'me' : 'them'}">
+      ${m.fromMe ? '' : `<div class="msg-sender">${escHtml(m.senderName || '')}</div>`}
+      <div>${escHtml(m.text || '')}</div>
+      <div class="msg-time">${fmtTime(m.timestamp)}</div>
+      ${m.id ? `<div class="msg-actions">
+        <button class="msg-act-btn" onclick="setReplyTo('${m.id}')">↩ Responder</button>
+        <button class="msg-act-btn" onclick="startForward('${m.id}')">↪ Encaminhar</button>
+      </div>` : ''}
+    </div>`).join('');
+  box.scrollTop = box.scrollHeight;
 }
 
 async function summarizeChat() {

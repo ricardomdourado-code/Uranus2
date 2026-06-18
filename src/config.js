@@ -18,7 +18,7 @@ export const config = {
     intervalMinutes: parseInt(process.env.READ_INTERVAL_MINUTES || '3', 10),
   },
   analysis: {
-    maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '10', 10),
+    maxMessagesPerChat: parseInt(process.env.MAX_MESSAGES_PER_CHAT || '25', 10),
     batchSize: 10,
     // Only analyze conversations active within this many days (or with unread msgs).
     activeDays: parseInt(process.env.ANALYSIS_ACTIVE_DAYS || '7', 10),
