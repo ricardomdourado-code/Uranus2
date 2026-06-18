@@ -1564,6 +1564,16 @@ function copyReply(btn) {
   });
 }
 
+async function fetchWithTimeout(url, opts, ms = 15000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 async function sendReply() {
   const text = document.getElementById('modal-reply-text').value.trim();
   if (!text && !pendingMedia) { showToast('Escreva uma resposta ou anexe um arquivo'); return; }
@@ -1572,12 +1582,13 @@ async function sendReply() {
 
   btn.disabled = true;
   btn.textContent = '⏳ Enviando...';
+  hint.textContent = '';
 
   try {
     // 1) Send media first (with the text as caption when applicable)
     if (pendingMedia) {
       const caption = pendingMedia.kind === 'audio' ? undefined : (text || undefined);
-      const mr = await fetch('/api/send-media/' + encodeURIComponent(modalChat.jid), {
+      const mr = await fetchWithTimeout('/api/send-media/' + encodeURIComponent(modalChat.jid), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...pendingMedia, caption }),
       });
@@ -1585,13 +1596,13 @@ async function sendReply() {
       if (!mr.ok) throw new Error(md.error || 'Erro ao enviar mídia');
       // If text was used as caption (non-audio), don't resend it as a separate message.
       if (pendingMedia.kind !== 'audio') {
-        finishSend(btn, hint); return;
+        await finishSend(btn, hint); return;
       }
     }
 
     // 2) Send text (optionally quoting a specific message / mentioning people)
     if (text) {
-      const r = await fetch('/api/send/' + encodeURIComponent(modalChat.jid), {
+      const r = await fetchWithTimeout('/api/send/' + encodeURIComponent(modalChat.jid), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1604,24 +1615,27 @@ async function sendReply() {
       if (!r.ok) throw new Error(data.error || 'Erro ao enviar');
     }
 
-    finishSend(btn, hint);
+    await finishSend(btn, hint);
   } catch (err) {
-    hint.textContent = '❌ Falha no envio: ' + err.message;
+    const msg = err.name === 'AbortError' ? 'Tempo esgotado — servidor não respondeu' : err.message;
+    hint.textContent = '❌ ' + msg;
+    showToast('❌ Falha no envio: ' + msg, 'critical');
     btn.disabled = false;
     btn.textContent = '📤 Enviar no WhatsApp';
   }
 }
 
 async function finishSend(btn, hint) {
-  hint.textContent = '✅ Mensagem enviada com sucesso!';
-  btn.textContent = '✅ Enviado';
   document.getElementById('modal-reply-text').value = '';
   selectedMentions = [];
   document.querySelectorAll('.mention-chip.selected').forEach(el => el.classList.remove('selected'));
   clearReplyContext();
   clearAttachment();
   await markReplied(modalChat.jid);
-  setTimeout(() => closeChatModal(), 1500);
+  showToast('✅ Mensagem enviada!');
+  btn.disabled = false;
+  btn.textContent = '📤 Enviar no WhatsApp';
+  hint.textContent = '✅ Enviada com sucesso!';
 }
 
 async function markReplied(jid) {
