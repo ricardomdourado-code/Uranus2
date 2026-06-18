@@ -557,7 +557,13 @@ export async function getAllChats(sock, options = {}) {
     if (!jid || jid === 'status@broadcast') continue;
 
     const msgs = store.messages.get(jid) || [];
-    const lastMsg = msgs[msgs.length - 1];
+    // Messages arrive out of order — pick the chronologically newest one.
+    let lastMsg = null;
+    for (const m of msgs) {
+      if (!lastMsg || (Number(m.messageTimestamp) || 0) >= (Number(lastMsg.messageTimestamp) || 0)) {
+        lastMsg = m;
+      }
+    }
     const lastTs = lastMsg?.messageTimestamp
       ? Number(lastMsg.messageTimestamp) * 1000
       : (chat.conversationTimestamp ? Number(chat.conversationTimestamp) * 1000 : 0);
@@ -660,12 +666,10 @@ export async function getAllChats(sock, options = {}) {
  */
 export async function getChatMessages(sock, jid, limit = 50) {
   try {
-    const stored = store.messages.get(jid) || [];
-    return formatMessages(stored.slice(-limit), jid);
+    return formatMessages(recentSorted(jid, limit), jid);
   } catch (err) {
     logger.warn({ err, jid }, 'Erro ao carregar mensagens da conversa');
-    const stored = store.messages.get(jid) || [];
-    return formatMessages(stored.slice(-limit), jid);
+    return formatMessages(recentSorted(jid, limit), jid);
   }
 }
 
@@ -674,8 +678,23 @@ export async function getChatMessages(sock, jid, limit = 50) {
  * Used by the dashboard detail view.
  */
 export function getRecentMessages(jid, limit = 20) {
-  const stored = store.messages.get(jid) || [];
-  return formatMessages(stored.slice(-limit), jid);
+  return formatMessages(recentSorted(jid, limit), jid);
+}
+
+/**
+ * Return the most recent `limit` stored messages for a chat, sorted
+ * chronologically (oldest -> newest). Messages arrive out of order (history
+ * sync + realtime), so we must sort by timestamp before slicing — otherwise
+ * the panel shows them in arrival order, not conversation order.
+ */
+function recentSorted(jid, limit) {
+  const stored = (store.messages.get(jid) || []).slice();
+  stored.sort((a, b) => {
+    const ta = Number(a.messageTimestamp) || 0;
+    const tb = Number(b.messageTimestamp) || 0;
+    return ta - tb;
+  });
+  return limit > 0 ? stored.slice(-limit) : stored;
 }
 
 /**
