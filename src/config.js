@@ -9,6 +9,9 @@ export const config = {
   whatsapp: {
     ownerName: process.env.WA_OWNER_NAME || 'Ricardo Dourado',
     authDir: resolve('./data/auth'),
+    // Pede ao WhatsApp o histórico completo ao parear/reconectar. Mantém o
+    // painel sincronizado mesmo após o servidor ficar um tempo desligado.
+    syncFullHistory: (process.env.WA_SYNC_FULL_HISTORY || 'true') !== 'false',
   },
   scheduler: {
     deepReadHour: parseInt(process.env.DEEP_READ_HOUR || '8', 10),

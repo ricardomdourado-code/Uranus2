@@ -314,7 +314,7 @@ export async function connectToWhatsApp() {
     auth: state,
     printQRInTerminal: false,
     logger: baileysLogger,
-    syncFullHistory: true,
+    syncFullHistory: config.whatsapp.syncFullHistory,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
   });

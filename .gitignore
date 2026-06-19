@@ -7,4 +7,5 @@ data/ignored.json
 data/resolved.json
 .env
 reports/
+logs/
 *.log
