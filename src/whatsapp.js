@@ -515,7 +515,15 @@ function nameIndex() {
 export function resolveJidName(jid) {
   if (!jid) return null;
   const idx = nameIndex();
-  return idx.get(jid) || idx.get(jidToReadable(jid)) || store.resolveName(jid) || null;
+  const resolved = idx.get(jid) || idx.get(jidToReadable(jid)) || store.resolveName(jid);
+  if (resolved) return resolved;
+  // For opaque IDs (long numeric @lid-style or actual @lid), show a short label
+  // so the UI always has something legible instead of a 15-digit raw number.
+  const raw = jidToReadable(jid);
+  if (jid.endsWith('@lid') || (raw && raw.length > 11 && /^\d+$/.test(raw))) {
+    return `···${raw.slice(-4)}`;
+  }
+  return null;
 }
 
 // Replace "@<number>" mentions inside message text with "@<name>" when known.
@@ -615,12 +623,17 @@ export async function getAllChats(sock, options = {}) {
         const meta = await sock.groupMetadata(jid).catch(() => null);
         if (meta) {
           name = meta.subject || name;
-          participants = (meta.participants || []).map((p) => ({
-            jid: p.id,
-            number: jidToReadable(p.id),
-            name: resolveJidName(p.id) || null,
-            isAdmin: p.admin != null,
-          }));
+          participants = (meta.participants || []).map((p) => {
+            const raw = jidToReadable(p.id);
+            const resolved = resolveJidName(p.id);
+            return {
+              jid: p.id,
+              number: raw,
+              // Use resolved name if available; for opaque IDs show ···NNNN
+              name: resolved || null,
+              isAdmin: p.admin != null,
+            };
+          });
         }
       } catch {
         // ignore group metadata errors

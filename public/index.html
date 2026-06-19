@@ -324,28 +324,23 @@
   .person-chip:hover { border-color: var(--accent); color: var(--accent); }
   .person-chip.direct { border-color: #8b5cf6; color: #c084fc; }
 
-  /* PARTICIPANT MENTION PICKER */
+  /* MENTION PICKER — search + chips */
   .mention-picker {
-    display: none;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 6px;
-    padding: 8px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    display: none; flex-direction: column; gap: 6px;
+    margin-top: 6px; padding: 8px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
   }
   .mention-picker.visible { display: flex; }
+  .mention-search {
+    width: 100%; background: #0f1626; border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px;
+    box-sizing: border-box;
+  }
+  .mention-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 90px; overflow-y: auto; }
   .mention-chip {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 3px 10px;
-    font-size: 11px;
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: all 0.15s;
-    user-select: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+    padding: 3px 10px; font-size: 11px; cursor: pointer; color: var(--text-muted);
+    transition: all 0.15s; user-select: none;
   }
   .mention-chip:hover { border-color: #60a5fa; color: #60a5fa; }
   .mention-chip.selected { background: rgba(59,130,246,0.2); border-color: var(--accent); color: #93c5fd; }
@@ -574,11 +569,33 @@
     width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: 8px;
     background: #0f1626; border: 1px solid var(--border); color: var(--text); font-size: 12px;
   }
+  /* PARTICIPANTS BOX — collapsible with scroll */
   .modal-participants {
     background: rgba(59,130,246,0.10); border: 1px solid var(--border);
     border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
-    font-size: 12px; color: #cbd5e1; line-height: 1.6;
+    font-size: 12px; color: #cbd5e1;
   }
+  .participants-toggle {
+    cursor: pointer; user-select: none; font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .participants-toggle .toggle-arrow { transition: transform 0.2s; font-size: 10px; }
+  .participants-toggle.open .toggle-arrow { transform: rotate(90deg); }
+  .participants-list {
+    display: none; margin-top: 8px;
+    max-height: 200px; overflow-y: auto;
+    border-top: 1px solid var(--border); padding-top: 6px;
+  }
+  .participants-list.open { display: block; }
+  .participant-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 2px; border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .participant-row:last-child { border-bottom: none; }
+  .participant-name { flex: 1; font-size: 12px; }
+  .participant-name.is-number { color: var(--text-muted); font-style: italic; }
+  .participant-rename { background: none; border: none; cursor: pointer; font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+  .participant-rename:hover { color: var(--accent); }
   .modal-summary-box {
     background: rgba(16,185,129,0.10); border: 1px solid #10b981;
     border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
@@ -832,7 +849,10 @@
       </div>
       <label class="reply-label">Sua resposta</label>
       <textarea id="modal-reply-text" class="reply-textarea" rows="4" placeholder="Escreva ou gere uma resposta com IA..."></textarea>
-      <div id="mention-picker" class="mention-picker" title="Clique para marcar participantes na mensagem"></div>
+      <div id="mention-picker" class="mention-picker">
+        <input id="mention-search" class="mention-search" placeholder="🔍 Pesquisar participante para marcar (@)..." oninput="filterMentionChips(this.value)" />
+        <div id="mention-chips" class="mention-chips"></div>
+      </div>
       <input id="modal-reply-instruction" class="reply-instruction" placeholder="(Opcional) Instrução para a IA: ex. 'seja mais formal', 'peça o prazo'" />
       <div class="attach-bar">
         <button class="attach-btn" onclick="document.getElementById('file-input').click()" title="Anexar arquivo ou foto">📎 Anexar</button>
@@ -1300,7 +1320,8 @@ async function openChatModal(jid) {
   document.getElementById('modal-summary-box').innerHTML = '';
   document.getElementById('modal-participants').style.display = 'none';
   document.getElementById('modal-participants').innerHTML = '';
-  document.getElementById('mention-picker').innerHTML = '';
+  document.getElementById('mention-chips').innerHTML = '';
+  document.getElementById('mention-search').value = '';
   document.getElementById('mention-picker').classList.remove('visible');
   selectedMentions = [];
   clearReplyContext();
@@ -1316,24 +1337,44 @@ async function openChatModal(jid) {
     document.getElementById('modal-sub').textContent =
       (d.type || '') + (d.phone ? ' · +' + d.phone : ' · sem nº direto (grupo/oculto)');
 
-    // Group participants (item #2) + mention picker (item #1)
+    // Participants box — collapsible, with rename button for raw numbers
     const pbox = document.getElementById('modal-participants');
     if (d.participants && d.participants.length) {
       pbox.style.display = 'block';
-      pbox.innerHTML = `<strong>👥 Participantes (${d.participants.length}):</strong> ` +
-        d.participants.map(p => escHtml(p.name || p.number || '')).filter(Boolean).join(' · ');
+      const ps = d.participants;
+      // Helper: detect if a display string is a raw number (not a real name)
+      const isRaw = s => /^\d{6,}$/.test((s || '').replace(/\D/g, '')) && !/\s/.test((s || '').trim());
+      pbox.innerHTML = `
+        <div class="participants-toggle" onclick="toggleParticipants(this)">
+          <span class="toggle-arrow">▶</span>
+          <span>👥 Participantes (${ps.length})</span>
+        </div>
+        <div class="participants-list">
+          ${ps.map(p => {
+            const display = p.name || p.number || p.jid || '';
+            const raw = isRaw(display);
+            const pjid = (p.jid || '').replace(/'/g, '');
+            return `<div class="participant-row">
+              <span class="participant-name${raw ? ' is-number' : ''}">${escHtml(display)}</span>
+              <button class="participant-rename" onclick="promptRename('${pjid}','${escHtml(display)}',this)" title="Renomear">✏️</button>
+            </div>`;
+          }).join('')}
+        </div>`;
 
-      // Mention picker — only for groups
+      // Mention picker — only for groups, with search
       if (d.type === 'Grupo') {
         const picker = document.getElementById('mention-picker');
+        const chipsEl = document.getElementById('mention-chips');
         const validParticipants = d.participants.filter(p => p.jid && (p.name || p.number));
         if (validParticipants.length) {
-          picker.innerHTML = '<span style="font-size:11px;color:var(--text-muted);margin-right:6px;">Marcar:</span>' +
-            validParticipants.map(p => {
-              const label = escHtml(p.name || p.number || '');
-              const pjid = escHtml(p.jid || '');
-              return `<span class="mention-chip" data-jid="${pjid}" onclick="toggleMentionChip(this,'${pjid}','${label}')">${label}</span>`;
-            }).join('');
+          // Store participants on picker element for filtering
+          picker._participants = validParticipants;
+          chipsEl.innerHTML = validParticipants.map(p => {
+            const label = p.name || p.number || '';
+            const pjid = (p.jid || '').replace(/'/g, '');
+            return `<span class="mention-chip" data-jid="${pjid}" data-label="${escHtml(label)}" onclick="toggleMentionChip(this,'${pjid}','${escHtml(label)}')">${escHtml(label)}</span>`;
+          }).join('');
+          document.getElementById('mention-search').value = '';
           picker.classList.add('visible');
         }
       }
@@ -1391,6 +1432,19 @@ async function summarizeChat() {
   } finally {
     btn.disabled = false; btn.textContent = '🧠 Resumir conversa';
   }
+}
+
+function toggleParticipants(toggleEl) {
+  toggleEl.classList.toggle('open');
+  toggleEl.nextElementSibling.classList.toggle('open');
+}
+
+function filterMentionChips(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('#mention-chips .mention-chip').forEach(chip => {
+    const label = (chip.dataset.label || chip.textContent).toLowerCase();
+    chip.style.display = (!q || label.includes(q)) ? '' : 'none';
+  });
 }
 
 function toggleMentionChip(el, jid, name) {
@@ -1645,6 +1699,8 @@ async function finishSend(btn, hint) {
   document.getElementById('modal-reply-text').value = '';
   selectedMentions = [];
   document.querySelectorAll('.mention-chip.selected').forEach(el => el.classList.remove('selected'));
+  const msearch = document.getElementById('mention-search');
+  if (msearch) { msearch.value = ''; filterMentionChips(''); }
   clearReplyContext();
   clearAttachment();
   await markReplied(modalChat.jid);
