@@ -503,6 +503,13 @@ export function initServer(port = 3000) {
       existing.lastMessageTime = act.timestamp;
       existing.unreadCount = act.unreadCount;
     }
+    // If an incoming message (not fromMe) arrives for a resolved chat, pull it
+    // back to Pendentes so the user doesn't miss the reply.
+    if (!act.fromMe && !act.revoked && state.resolvedJids.has(act.jid)) {
+      state.resolvedJids.delete(act.jid);
+      delete state.repliedAt[act.jid];
+      saveResolved().catch(() => {});
+    }
     broadcast('message-activity', act);
   });
 }

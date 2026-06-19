@@ -1089,6 +1089,13 @@ function applyMessageActivity(act) {
       actionItems: [],
     });
   }
+  // If this is an incoming message (not sent by us) and the chat was marked as
+  // "responded", move it back to Pendentes so it doesn't go unnoticed.
+  if (!act.fromMe && resolvedSet.has(act.jid)) {
+    resolvedSet.delete(act.jid);
+    // Persist the un-resolve on the server so it survives a page reload.
+    fetch('/api/resolve/' + encodeURIComponent(act.jid), { method: 'DELETE' }).catch(() => {});
+  }
   renderPriorities();
 }
 
